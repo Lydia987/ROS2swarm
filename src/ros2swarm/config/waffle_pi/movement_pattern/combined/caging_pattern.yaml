@@ -1,0 +1,16 @@
+/**:
+  ros__parameters:
+    robot_length: 0.20925 # m
+    robot_radius: 0.220 # m
+    turn_timer_period: 3.46 #s
+    goal_search_timer_period: 10.0 # s
+    object_search_timer_period: 2.0 # s
+    object_distance_reached: 1.5 # m
+    max_translational_velocity: 0.5 # 0.26 # m/s
+    max_rotational_velocity: 1.82    # rad/s
+    random_walk_timer_period: 0.25
+    random_walk_linear: 0.26
+    random_walk_angular: 1.82
+    random_walk_rot_interval: 3.5
+    random_walk_lin_interval_min: 10.0
+    random_walk_lin_interval_max: 15.0

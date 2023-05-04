@@ -54,7 +54,7 @@ class RandomWalkPattern(MovementPattern):
     def timer_callback(self):
         """Publish the configured twist message when called."""
         self.command_publisher.publish(self.current_msg)
-        self.get_logger().debug('Publishing {}:"{}"'.format(self.i, self.current_msg))
+        # self.get_logger().debug('Publishing {}:"{}"'.format(self.i, self.current_msg))
         self.i += 1
 
     def random(self):
@@ -72,10 +72,9 @@ class RandomWalkPattern(MovementPattern):
             self.walk.cancel()
             bu = random.uniform(self.lin_interval_min, self.lin_interval_max)
             self.walk = self.create_timer(bu, self.random)
-            self.get_logger().info('Publishing {}:"{}"'.format(self.i, bu))
+            # self.get_logger().info('Publishing {}:"{}"'.format(self.i, bu))
         self.turn = not self.turn
         self.current_msg = msg
-
 
 def main(args=None):
     setup_node.init_and_spin(args, RandomWalkPattern)

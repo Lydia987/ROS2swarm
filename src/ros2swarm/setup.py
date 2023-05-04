@@ -99,9 +99,13 @@ setup(
             'ros2swarm.movement_pattern.basic.minimalist_flocking_pattern:main',
             'rat_search_pattern = '
             'ros2swarm.movement_pattern.basic.rat_search_pattern:main',
+            'search_object_pattern = '
+            'ros2swarm.movement_pattern.basic.search_object_pattern:main',
             # movement_pattern.combined
             'discussed_dispersion_pattern = '
             'ros2swarm.movement_pattern.combined.discussed_dispersion_pattern:main',
+            'caging_pattern = '
+            'ros2swarm.movement_pattern.combined.caging_pattern:main',
 
             # voting.basic
             'voter_model_pattern = '

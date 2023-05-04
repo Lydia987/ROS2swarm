@@ -14,6 +14,7 @@
 #    limitations under the License.
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
+from communication_interfaces.msg import StringMessage
 
 from ros2swarm.abstract_pattern import AbstractPattern
 from ros2swarm.utils import setup_node
@@ -49,6 +50,13 @@ class HardwareProtectionLayer(AbstractPattern):
                 ('lidar_config', None)
             ])
 
+        self.protection_latest = StringMessage()
+        self.protection_subscription = self.create_subscription(
+            StringMessage,
+            self.get_namespace() + '/hardware_protection_layer',
+            self.protection_callback,
+            10)
+
         self.command_subscription = self.create_subscription(
             Twist,
             self.get_namespace() + '/drive_command',
@@ -83,6 +91,9 @@ class HardwareProtectionLayer(AbstractPattern):
             "lidar_config").get_parameter_value().double_value if self.get_parameter(
             "lidar_config").get_parameter_value().type == 3 else None
 
+    def protection_callback(self, incoming_msg: StringMessage):
+        self.protection_latest = incoming_msg
+
     def destroy_node(self):
         """Send a stop twist message and calls the super destroy method."""
         self.publisher_cmd_vel.publish(Twist())
@@ -106,7 +117,10 @@ class HardwareProtectionLayer(AbstractPattern):
                                                                             self.param_max_translational_velocity,
                                                                             self.param_min_range, self.current_scan,
                                                                             self.param_threshold, self.lidar_config)
-        avoid_needed = not obstacle_free
+        if self.protection_latest.data == 'False':
+            avoid_needed = False
+        else:
+            avoid_needed = not obstacle_free
 
         return [avoid_needed, direction]
 
@@ -138,6 +152,7 @@ class HardwareProtectionLayer(AbstractPattern):
         if adjust:
             self.publisher_cmd_vel.publish(direction)
             self.get_logger().debug('Adjusting to"%s"' % direction)
+
 
 def main(args=None):
     setup_node.init_and_spin(args, HardwareProtectionLayer)

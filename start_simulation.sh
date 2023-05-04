@@ -15,12 +15,22 @@
 colcon build --symlink-install --allow-overriding communication_interfaces launch_turtlebot_gazebo ros2swarm&&
  source ./install/setup.bash &&
  ROS_DOMAIN_ID=42 ros2 launch launch_turtlebot_gazebo create_enviroment.launch.py \
- gazebo_world:=arena_large.world \
- pattern:=aggregation_pattern \
- number_robots:=9 \
+ gazebo_world:=arena_large.world\
+ pattern:=caging_pattern\
+ number_robots:=1\
  log_level:=info \
  robot:=waffle_pi
-# gazebo_world arena_large.world | arena.world | empty.world | turtle.world | 560x540m.world | Ymaze.world | Ymaze_camber.world | Ymaze_camber_top.world
+
+# gazebo_world:
+#  * arena_large.world
+#  * arena.world
+#  * empty.world
+#  * turtle.world
+#  * 560x540m.world
+#  * Ymaze.world
+#  * Ymaze_camber.world
+#  * Ymaze_camber_top.world
+
 # pattern pattern_name
 ## movement pattern:
 #  * drive_pattern
@@ -34,11 +44,13 @@ colcon build --symlink-install --allow-overriding communication_interfaces launc
 #  * flocking_pattern
 #  * flocking_pattern2
 #  * random_walk_pattern
+#  * search_object_pattern
+#  * caging_pattern
 #  * discussed_dispersion_pattern
 ## voting_pattern:
 #  * voter_model_pattern
 #  * voter_model_with_limiter_pattern
 #  * majority_rule_pattern
-#
+
 # number_robots num_robots
 # robot: burger | waffle_pi | jackal

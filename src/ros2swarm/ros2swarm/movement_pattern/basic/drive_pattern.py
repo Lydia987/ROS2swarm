@@ -38,7 +38,7 @@ class DrivePattern(MovementPattern):
 
         timer_period = float(
             self.get_parameter("drive_timer_period").get_parameter_value().double_value)
-        #self.timer = self.create_timer(timer_period, self.swarm_command_controlled(self.timer_callback))
+        #self.timer = self.create_timer(timer_period, self.swarm_command_controlled(self.caging))
         self.timer = self.create_timer(timer_period, self.swarm_command_controlled_timer(self.timer_callback))
         self.i = 0
         self.param_x = float(self.get_parameter("drive_linear").get_parameter_value().double_value)
