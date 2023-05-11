@@ -5,7 +5,7 @@
     turn_timer_period: 3.46 #s
     goal_search_timer_period: 10.0 # s
     object_search_timer_period: 2.0 # s
-    object_distance_reached: 1.5 # m
+    object_distance_reached: 1.5 # m TODO: Entfernen
     max_translational_velocity: 0.5 # 0.26 # m/s
     max_rotational_velocity: 1.82    # rad/s
     random_walk_timer_period: 0.25
