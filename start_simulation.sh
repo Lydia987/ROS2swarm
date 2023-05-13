@@ -46,6 +46,7 @@ colcon build --symlink-install --allow-overriding communication_interfaces launc
 #  * random_walk_pattern
 #  * search_object_pattern
 #  * caging_pattern
+#  * dynamic_change_transport_pattern
 #  * discussed_dispersion_pattern
 ## voting_pattern:
 #  * voter_model_pattern

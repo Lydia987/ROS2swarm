@@ -4,7 +4,7 @@
     target_search_timer_period: 10.0 # s
     object_search_timer_period: 2.0 # s
     wall_follow_timer_period: 15.0 # s
-    object_distance_reached: 0.75 # m
+    object_distance_reached: 0.75 # m # TODO: Hier entfernen und im Code direkt implementieren
     max_translational_velocity: 0.26 # m/s
     max_rotational_velocity: 1.82    # rad/s
     random_walk_timer_period: 10 # 0.25

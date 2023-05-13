@@ -34,14 +34,14 @@ import random
 # TODO: Umbenennung der Klasse und aktualisierung + schreiben aller Komentare
 
 
-class ObjectSearchPattern(MovementPattern):
+class PushingPattern(MovementPattern):
     """
     Pattern to search and drive to an object with a defined color.
     """
 
     def __init__(self):
-        """Initialize the object search pattern node."""
-        super().__init__('object_search_pattern')
+        """Initialize the pushing pattern node."""
+        super().__init__('pushing_pattern')
         self.declare_parameters(
             namespace='',
             parameters=[
@@ -127,7 +127,7 @@ class ObjectSearchPattern(MovementPattern):
         self.goal_is_occluded = False
 
         self.info = StringMessage()
-        self.info.data = 'Starting Search Object Pattern'
+        self.info.data = 'Starting pushing pattern'
         self.information_publisher.publish(self.info)
 
         self.protection = StringMessage()
@@ -166,7 +166,7 @@ class ObjectSearchPattern(MovementPattern):
         self.random_walk_latest.angular.z = random.randint(-1, 2) * random.randint(1, 11) * 0.1 * self.param_max_rotational_velocity
 
         # TODO: wieder entfernen, wenn timer einkommentiert
-        self.timer_callback()
+        self.pushing()
 
     def camera_callback(self, raw_image_msg: Image):
         """Call back if a new scan msg is available."""
@@ -180,7 +180,7 @@ class ObjectSearchPattern(MovementPattern):
             self.search_object_timer.is_alive()) + ' wall= ' + str(self.move_around_object_timer.is_alive())
         self.information_publisher.publish(self.info)
 
-    def timer_callback(self):
+    def pushing(self):
         old_state = self.state
         # self.info.data = 'Bin in Timer Callback'
         # self.information_publisher.publish(self.info)
@@ -551,8 +551,8 @@ class ObjectSearchPattern(MovementPattern):
 
 
 def main(args=None):
-    """Create a node for the object search and handle the setup."""
-    setup_node.init_and_spin(args, ObjectSearchPattern)
+    """Create a node for the pushing pattern and handle the setup."""
+    setup_node.init_and_spin(args, PushingPattern)
 
 
 if __name__ == '__main__':

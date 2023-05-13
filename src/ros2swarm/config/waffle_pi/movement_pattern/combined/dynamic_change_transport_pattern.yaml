@@ -1,0 +1,30 @@
+/**:
+  ros__parameters:
+    # dynamic_change_pattern
+    max_transport_time: 1200.0 # s
+
+    # Common
+    max_translational_velocity: 0.5 # 0.26 # m/s
+    max_rotational_velocity: 1.82    # rad/s
+    robot_length: 0.20925 # m
+    robot_radius: 0.220 # m
+
+    # random_walk_pattern
+    random_walk_timer_period: 0.25
+    random_walk_linear: 0.26
+    random_walk_angular: 1.82
+    random_walk_rot_interval: 3.5
+    random_walk_lin_interval_min: 10.0
+    random_walk_lin_interval_max: 15.0
+
+    # search_object_pattern / caging_pattern
+    turn_timer_period: 3.46 #s
+    goal_search_timer_period: 10.0 # s
+    target_search_timer_period: 10.0 # s # TODO: vereinheitlichen zu goal_search...
+    object_search_timer_period: 2.0 # s
+    wall_follow_timer_period: 15.0 # s
+    # TODO: add object_name and goal_name
+
+
+
+

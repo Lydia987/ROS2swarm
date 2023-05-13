@@ -404,7 +404,6 @@ class CagingPattern(MovementPattern):
                 ('turn_timer_period', None),
                 ('goal_search_timer_period', None),
                 ('object_search_timer_period', None),
-                ('object_distance_reached', None),
                 ('max_translational_velocity', None),
                 ('max_rotational_velocity', None),
                 ('robot_radius', None),
@@ -416,7 +415,6 @@ class CagingPattern(MovementPattern):
             "max_translational_velocity").get_parameter_value().double_value
         self.param_max_rotational_velocity = self.get_parameter(
             "max_rotational_velocity").get_parameter_value().double_value
-        self.param_distance_reached = self.get_parameter("object_distance_reached").get_parameter_value().double_value
         self.param_turn_timer_period = self.get_parameter("turn_timer_period").get_parameter_value().double_value
         self.param_goal_timer_period = self.get_parameter("goal_search_timer_period").get_parameter_value().double_value
         self.param_object_timer_period = self.get_parameter(
@@ -488,7 +486,7 @@ class CagingPattern(MovementPattern):
         # print(cv.cvtColor(np.uint8([[BGR]]),cv.COLOR_BGR2HSV))
 
         # OBJECT variables #
-        self.object_name = "Green"  # "concave" # "Green_Quader_3x2"  # "Green" #
+        self.object_name = "Green_Quader_3x2"  # "concave" # "Green_Quader_3x2"  # "Green" #
         self.lower_object_color = np.array([50, 50, 50])  # np.array([50, 50, 50])  # in HSV [H-10, 100,100]
         self.upper_object_color = np.array([70, 255, 255])  # np.array([70, 255, 255])  # in HSV [H+10, 255, 255]
         self.near_object = False
@@ -607,7 +605,7 @@ class CagingPattern(MovementPattern):
             index += 1
 
     def odom_callback(self, odom_msg):
-        if self.current_scan is not None and self.state == State.MOVE_AROUND_OBJECT:
+        if self.current_scan is not None and self.state == State.SURVEY_OBJECT:
             currentPosition = [odom_msg.pose.pose.position.x, odom_msg.pose.pose.position.y]
             z = odom_msg.pose.pose.orientation.z
             w = odom_msg.pose.pose.orientation.w
@@ -670,7 +668,7 @@ class CagingPattern(MovementPattern):
             self.quorum = False
             self.closure = False
 
-        if self.state == State.APPROACH or self.state == State.SURROUND or self.state == State.MOVE_AROUND_OBJECT:
+        if self.state == State.APPROACH or self.state == State.SURROUND or self.state == State.SURVEY_OBJECT:
             self.update_is_near_object()
 
         if self.state == State.SURROUND or self.state == State.TRANSPORT:
@@ -706,7 +704,7 @@ class CagingPattern(MovementPattern):
             elif self.state == State.APPROACH:
                 if self.near_object:
                     if self.d_max <= 0.0:
-                        self.state = State.MOVE_AROUND_OBJECT
+                        self.state = State.SURVEY_OBJECT
                     else:
                         self.state = State.SURROUND
                 #
@@ -715,11 +713,11 @@ class CagingPattern(MovementPattern):
                 # elif self.near_object:
                 #     self.state = State.SURROUND
 
-            elif self.state == State.MOVE_AROUND_OBJECT:
+            elif self.state == State.SURVEY_OBJECT:
                 if not self.near_object:
                     self.state = State.APPROACH
                 elif self.d_max <= 0.0:
-                    self.state = State.MOVE_AROUND_OBJECT
+                    self.state = State.SURVEY_OBJECT
                 else:
                     self.state = State.SURROUND
 
@@ -761,8 +759,8 @@ class CagingPattern(MovementPattern):
             self.direction = self.random_walk_latest
             self.protection.data = 'True'
 
-        elif self.state == State.MOVE_AROUND_OBJECT:
-            self.direction = self.moveAroundObject()
+        elif self.state == State.SURVEY_OBJECT:
+            self.direction = self.survey_object()
             self.protection.data = 'True'
 
         elif self.state == State.APPROACH:  # if d_obj(q_i) > d_near object
@@ -805,14 +803,14 @@ class CagingPattern(MovementPattern):
         transport.angular.z = w
         return transport
 
-    def moveAroundObject(self):
-        moveAroundObject = Twist()
+    def survey_object(self):
+        survey_object = Twist()
         # nur zu test zwecken
         if len(self.odometry_list) > 0:
             if self.start_index_survey == np.inf:
                 self.start_index_survey = len(self.odometry_list) - 1
             elif self.start_index_survey == -1:
-                return moveAroundObject
+                return survey_object
 
             position = self.odometry_list[-1][0]
             start_position = self.odometry_list[self.start_index_survey][0]
@@ -823,9 +821,9 @@ class CagingPattern(MovementPattern):
                 self.update_shape_parameters(self.odometry_list[self.start_index_survey:-1])
                 self.start_index_survey = -1
             else:
-                moveAroundObject = self.wall_follow()
+                survey_object = self.wall_follow()
 
-        return moveAroundObject
+        return survey_object
 
     def wall_follow(self):
         """calculates the vector to follow the left wall"""
@@ -1020,7 +1018,7 @@ class CagingPattern(MovementPattern):
                     if np.deg2rad(85) < robot[1] < np.deg2rad(95):
                         dist_valid = False
 
-        if self.state == State.MOVE_AROUND_OBJECT:
+        if self.state == State.SURVEY_OBJECT:
             dist = get_distance(self.current_scan, 90)
             for robot in robots_center:
                 if np.deg2rad(75) < robot[1] < np.deg2rad(105):
@@ -1220,8 +1218,7 @@ class CagingPattern(MovementPattern):
 
     def gamma(self, q):
         if self.state == State.TRANSPORT:
-            # TODO: distance muss abhängig von object durchmesser gesetzt werden - ist es aktuell
-            #  oder über die Zeit des Transports verändert werden wenn sich das Objekt nicht bewegt - vermutlich besser
+            # TODO: eventuell 0.75 noch erhöhen oder verringern
             center = get_trajectory(self.current_object_center, self.goal_position, self.d_min * 0.75)
         else:
             center = self.current_object_center
