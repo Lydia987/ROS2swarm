@@ -21,9 +21,8 @@ from cv_bridge import CvBridge
 
 bridge = CvBridge()
 
-
-# TODO: austesten wie weit d_max und d_min bei den verschiedenen Robotern variieren
 # TODO: Schwerpunkt von concave noch richtig setzten
+# TODO: bei transport trotzdem noch hardware_protection, aber nur wenn auf der rechten seite des Roboters ein Hindernis ist
 # TODO: Fehleranfälligkeit bei zu vielen Robotern reduzieren durch raushalten eines Roboters aus dem Transport,
 #        wenn schon mehr als 2 Roboter als benötigt im quorum sind
 # TODO: abschätzung der höhe, aber nur bei combined machen: möglich bei approach mehrere messungen von dist und daraus abschätzung der höhe im kamerabild
@@ -140,7 +139,7 @@ def get_contours(img):
     return contours
 
 
-def get_approx_dmin(img):
+def get_approx_dmin(img, robot_name):
     contours = get_contours(img)
     contour = None
     w = 0.0
@@ -158,19 +157,19 @@ def get_approx_dmin(img):
         w_new = rect_new[1][0]
         h_new = rect_new[1][1]
 
-    if w_new * h_new > w * h:
-        w = w_new
-        h = h_new
-        rect = rect_new
-        # contour approximieren
-        approx = cv.approxPolyDP(contour, 15, True)
+        if w_new * h_new > w * h:
+            w = w_new
+            h = h_new
+            rect = rect_new
+            # contour approximieren
+            approx = cv.approxPolyDP(contour, 15, True)
 
     d_min = min(w, h)
 
     box = np.intp(cv.boxPoints(rect))
     cv.drawContours(img, [box], 0, (0, 255, 0), 2)
     cv.drawContours(img, [approx], -1, (0, 0, 255), 2)
-    cv.imwrite("/home/lydia/Bilder/AusgewerteteShape.jpeg", img)  # TODO: wieder entfernen
+    cv.imwrite("/home/lydia/Bilder/AusgewerteteShape" + robot_name + ".jpeg", img)  # TODO: wieder entfernen
 
     return approx, d_min/100
 
@@ -209,7 +208,7 @@ def approx2contour(approx):
     return contour
 
 
-def get_dmax(contour):
+def get_dmax(contour, robot_name):
     d_max = 0.0
     max_line = []
 
@@ -224,9 +223,9 @@ def get_dmax(contour):
                 max_line = [(int(p1[0]), int(p1[1])), (int(p2[0]), int(p2[1]))]
 
     # draw d_max in img TODO: wieder entfernen
-    img = cv.imread("/home/lydia/Bilder/AusgewerteteShape.jpeg")
+    img = cv.imread("/home/lydia/Bilder/AusgewerteteShape" + robot_name + ".jpeg")
     cv.line(img, max_line[0], max_line[1], (255, 255, 0), 2)
-    cv.imwrite("/home/lydia/Bilder/AusgewerteteShape.jpeg", img)
+    cv.imwrite("/home/lydia/Bilder/AusgewerteteShape" + robot_name + ".jpeg", img)
 
     return d_max/100
 
@@ -412,7 +411,7 @@ class CagingPattern(MovementPattern):
                 ('robot_length', None)
             ])
 
-        # Params
+        # PARAMS #
         self.param_max_translational_velocity = self.get_parameter(
             "max_translational_velocity").get_parameter_value().double_value
         self.param_max_rotational_velocity = self.get_parameter(
@@ -425,12 +424,12 @@ class CagingPattern(MovementPattern):
         self.r = self.get_parameter("robot_radius").get_parameter_value().double_value
         self.l = self.get_parameter("robot_length").get_parameter_value().double_value
 
-        # messages from subpattern subscription
+        # SUBPATTERN #
         self.random_walk_latest = Twist()
         self.random_walk_subpattern = self.create_subscription(Twist,
                                                                self.get_namespace() + '/drive_command_random_walk_pattern',
                                                                self.command_callback_random_walk, 10)
-        # Subscriber
+        # SUBSCRIBER #
         self.model_states_subscription = self.create_subscription(ModelStates, '/gazebo/model_states',
                                                                   self.model_states_callback,
                                                                   qos_profile=qos_profile_sensor_data)
@@ -449,7 +448,7 @@ class CagingPattern(MovementPattern):
         self.goal_subscription = self.create_subscription(
             StringMessage, '/goal', self.goal_callback, 10)
 
-        # Publisher
+        # PUBLISHER #
         self.goal_publisher = self.create_publisher(
             StringMessage, '/goal', 10)
         self.information_publisher = self.create_publisher(
@@ -457,11 +456,15 @@ class CagingPattern(MovementPattern):
         self.protection_publisher = self.create_publisher(
             StringMessage, self.get_namespace() + '/hardware_protection_layer', 10)
 
+        # COUNTER #
+        self.transport_switch_counter = 0
+        self.surround_switch_counter = 0
+        self.quorum_switch_counter = 0
+
         self.direction = Twist()
         self.state = State.INIT
-        self.publish_state_counter = 0
-        self.state_switch_counter = 0
-        self.quorum_switch_counter = 0
+        self.current_scan = None
+        self.current_image = None
         self.last_error = 0.0
         self.integral_error = 0.0
         self.closure = False
@@ -471,35 +474,36 @@ class CagingPattern(MovementPattern):
         self.quorum_msg.data = 'False'
         self.d_min = 0.0
         self.d_max = 0.0
-        self.e = 0.0  # war 0.15 bei 2x2 Kreis gut, bei 3x2 quader 0.23
+        self.e = 0.0
         self.R = 3.0  # 1.5  # Sensor_Range in m
         self.Q = [[0.0,
                    0.0]]  # Liste mit der eigenen Position an erster Stelle und danach die Positionen aller Nachbarn (alle Roboter die sich in der Range R um den Roboter befinden)
-        self.clockwise = False
         self.current_pose = [0.0, 0.0, 0.0]  # [x, y, orientation] in [m, m, rad]
         self.odometry_list = []
-        self.start = np.inf  # index of the odometry list, where move around object started
-        self.current_scan = None
-        self.current_image = None
+        self.start_index_survey = np.inf  # index of the list at which the survey of the object was started
 
         # color in RGB = [76, 142, 24] , in BGR = [24, 142, 76] and in HSV = [47 212 142]
         # [100, 50, 50] bis [140, 255, 255] entspricht rot, aber warum ???
         # [50, 100, 100] bis [70, 255, 255] entspricht grün
         # print(cv.cvtColor(np.uint8([[BGR]]),cv.COLOR_BGR2HSV))
+
+        # OBJECT variables #
+        self.object_name = "Green"  # "concave" # "Green_Quader_3x2"  # "Green" #
         self.lower_object_color = np.array([50, 50, 50])  # np.array([50, 50, 50])  # in HSV [H-10, 100,100]
         self.upper_object_color = np.array([70, 255, 255])  # np.array([70, 255, 255])  # in HSV [H+10, 255, 255]
         self.near_object = False
+        self.near_object_counter = 0
         self.object_in_image = False
         self.object_direction = None
         self.object_distance = np.inf
         self.current_object_center = np.array([0.0, 0.0])
-        self.object_name = "Green_Quader_3x2"  # "concave" # "Green_Quader_3x2"  # "Green"
 
+        # GOAL variables #
+        self.goal_name = "Red"
         self.lower_goal_color = np.array([110, 100, 100])  # np.array([0, 50, 50])  # in HSV [H-10, 100,100]
         self.upper_goal_color = np.array([130, 255, 255])  # np.array([10, 255, 255])  # in HSV [H+10, 255, 255]
         self.goal_in_image = False
         self.goal_position = [0.0, 0.0]
-        self.goal_name = "Red"
         self.goal_dict = {}
         self.goal_msg = StringMessage()
         self.goal_msg.data = 'False'
@@ -512,7 +516,7 @@ class CagingPattern(MovementPattern):
         self.protection.data = 'True'
         self.protection_publisher.publish(self.protection)
 
-        # Timer
+        # TIMER #
         # self.state_timer = Timer(0.01, self.caging)
         # self.state_timer.start()
         self.search_goal_timer = Timer(self.param_goal_timer_period, self.is_goal_visible,
@@ -523,13 +527,14 @@ class CagingPattern(MovementPattern):
         self.last_call_time = time.time()
 
         # Variablen für das Testen und Auswerten
+        self.publish_state_counter = 0
         self.test_counter = 200
         self.robots_in_quorum = 0
         self.error_list = []
         self.should_orientation = 0.0
         # 0 = time, 1 = velocity, 2 = state, 3 = pose, 4 = object_center, 5 = error, 6 = should_orientation,
-        # 7 = #robots in quorum, 8 = goal_position, 9 = quorum, 10 = closure]
-        self.state_list = [[], [[], []], [], [[], [], []], [[], []], [], [], [], [[], []], [], []]
+        # 7 = #robots in quorum, 8 = goal_position, 9 = quorum, 10 = closure, 11 = caging_parameter]
+        self.state_list = [[], [[], []], [], [[], [], []], [[], []], [], [], [], [[], []], [], [], []]
 
     # PUBLISHER #
     def publish_state(self):
@@ -549,6 +554,7 @@ class CagingPattern(MovementPattern):
         self.state_list[8][1].append(self.goal_position[1])
         self.state_list[9].append([int(self.quorum)])
         self.state_list[10].append([int(self.closure)])
+        self.state_list[11].append([self.d_min, self.d_max, self.e, self.get_r_cage()])
         # if len(self.odometry_list) > 0:
         #     self.state_list[11][0].append(self.odometry_list[-1][0][0])
         #     self.state_list[11][1].append(self.odometry_list[-1][0][1])
@@ -664,16 +670,11 @@ class CagingPattern(MovementPattern):
             self.quorum = False
             self.closure = False
 
-        if self.state == State.APPROACH or self.state == State.SURROUND:
+        if self.state == State.APPROACH or self.state == State.SURROUND or self.state == State.MOVE_AROUND_OBJECT:
             self.update_is_near_object()
 
         if self.state == State.SURROUND or self.state == State.TRANSPORT:
             self.update_Q()
-            # if self.test_counter < 0:
-            #     self.closure = True
-            #     self.quorum = True
-            # else:
-            #     self.test_counter -= 1
             self.update_is_closure()
             self.update_is_quorum(self.current_scan)
             if (not self.quorum) and old_quorum and self.quorum_switch_counter > 30:
@@ -702,12 +703,6 @@ class CagingPattern(MovementPattern):
                 if self.object_in_image:
                     self.state = State.APPROACH
 
-            elif self.state == State.MOVE_AROUND_OBJECT:
-                if self.d_max <= 0.0:
-                    self.state = State.MOVE_AROUND_OBJECT
-                else:
-                    self.state = State.SURROUND
-
             elif self.state == State.APPROACH:
                 if self.near_object:
                     if self.d_max <= 0.0:
@@ -720,6 +715,14 @@ class CagingPattern(MovementPattern):
                 # elif self.near_object:
                 #     self.state = State.SURROUND
 
+            elif self.state == State.MOVE_AROUND_OBJECT:
+                if not self.near_object:
+                    self.state = State.APPROACH
+                elif self.d_max <= 0.0:
+                    self.state = State.MOVE_AROUND_OBJECT
+                else:
+                    self.state = State.SURROUND
+
             elif self.state == State.SURROUND:
                 if not self.near_object:
                     self.state = State.APPROACH
@@ -730,13 +733,19 @@ class CagingPattern(MovementPattern):
                 if not (self.closure and self.quorum):
                     self.state = State.SURROUND
 
-        if self.state != old_state and (old_state == State.SURROUND or old_state == State.TRANSPORT) \
-                and self.state != State.TRANSPORT and self.state_switch_counter < 20:
+        if old_state == State.SURROUND and self.state != State.APPROACH and self.surround_switch_counter < 15:
             self.publish_info("state_switch_counter")
-            self.state_switch_counter += 1
+            self.surround_switch_counter += 1
             self.state = old_state
         else:
-            self.state_switch_counter = 0
+            self.surround_switch_counter = 0
+
+        if old_state == State.TRANSPORT and self.state != State.TRANSPORT and self.transport_switch_counter < 40:
+            self.publish_info("state_switch_counter")
+            self.transport_switch_counter += 1
+            self.state = old_state
+        else:
+            self.transport_switch_counter = 0
 
     def execute_state(self):
         # self.publish_info('execute_state')
@@ -764,7 +773,7 @@ class CagingPattern(MovementPattern):
 
         elif self.state == State.SURROUND:  # if d_obj(q_i) ≤ d_near object
             self.direction = self.surround()
-            self.protection.data = 'False'
+            self.protection.data = 'True'
 
         elif self.state == State.TRANSPORT:
             self.direction = self.transport()
@@ -795,6 +804,59 @@ class CagingPattern(MovementPattern):
         transport.linear.x = v
         transport.angular.z = w
         return transport
+
+    def moveAroundObject(self):
+        moveAroundObject = Twist()
+        # nur zu test zwecken
+        if len(self.odometry_list) > 0:
+            if self.start_index_survey == np.inf:
+                self.start_index_survey = len(self.odometry_list) - 1
+            elif self.start_index_survey == -1:
+                return moveAroundObject
+
+            position = self.odometry_list[-1][0]
+            start_position = self.odometry_list[self.start_index_survey][0]
+            distance_to_start = np.linalg.norm(np.subtract(position, start_position))
+
+            if self.start_index_survey > 0 and len(self.odometry_list) > self.start_index_survey + 300 and (
+                    len(self.odometry_list) > self.start_index_survey + 1500 or distance_to_start < 0.01):
+                self.update_shape_parameters(self.odometry_list[self.start_index_survey:-1])
+                self.start_index_survey = -1
+            else:
+                moveAroundObject = self.wall_follow()
+
+        return moveAroundObject
+
+    def wall_follow(self):
+        """calculates the vector to follow the left wall"""
+
+        scan_msg = self.current_scan
+        left_mean_dist = get_mean_dist(scan_msg, 30, 80)
+        front_mean_dist = get_mean_dist(scan_msg, -30, 30)
+        desired_dist = 1.9  # desired distance to the wall
+        error = left_mean_dist - desired_dist
+
+        linear = self.param_max_translational_velocity
+        angular = error * 1.5
+
+        if front_mean_dist < desired_dist + 0.65:
+            # turn right:
+            angular = -1.0
+
+        robots, robots_center = get_neighbors(self.current_scan, 1.6)
+        min_dist = np.inf
+        for robot in robots_center:
+            if np.deg2rad(350) < robot[1] < np.deg2rad(10) and robot[0] < min_dist:
+                min_dist = robot[0]
+            if min_dist <= 1.6:
+                linear = linear * min_dist * 0.53
+
+        linear, angular = self.scale_velocity(linear, angular)
+        wall_follow_direction = Twist()
+        wall_follow_direction.angular.z = angular
+        wall_follow_direction.linear.x = linear
+
+        return wall_follow_direction
 
     def shape_control(self, K):
         # K controls the rate of descent to the specified surface relative the orbiting velocity and is used to help generate different behaviors
@@ -888,8 +950,6 @@ class CagingPattern(MovementPattern):
         self.command_publisher.publish(turn)
         self.turn_timer.start()
 
-        self.publish_info('!!!!!!!!!!!!!!! turn_timer START !!!!!!!!!!!!!!!!!')
-
     # FLAGGEN #
     def is_busy(self):
         if self.turn_timer.is_alive() and self.state != State.INIT:
@@ -900,7 +960,7 @@ class CagingPattern(MovementPattern):
     def update_is_quorum(self, scan_msg):
         # TODO: mit paper überprüfen ob richtig implementiert
         # TODO: max_range sollte laut dem Paper D_min(obj) entsprechen
-        max_range = 3.5  # eigentlich self.d_min + self.r vermutlich läuft es aber mit einer etwas größeren range besser
+        max_range = self.d_min + self.r + 1.0  # eigentlich self.d_min + self.r vermutlich läuft es aber mit einer etwas größeren range besser
         robots, robots_center = get_neighbors(scan_msg, max_range)
         front = 0
         back = 0
@@ -934,39 +994,71 @@ class CagingPattern(MovementPattern):
 
     def update_is_near_object(self):
         old_near_object = self.near_object
+        self.near_object = True
         dist_valid = True
-        robots, robots_center = get_neighbors(self.current_scan, self.get_r_cage() - self.d_min)
+
         # dist = np.linalg.norm(self.current_pose[0:1]-self.current_object_center)
         # 0° ist vorne, 90° ist links, 180° ist hinten, 270° ist rechts
         if self.d_max <= 0.0:
-            desired_dist = 1.0
+            robots, robots_center = get_neighbors(self.current_scan, 1.5)
         else:
-            desired_dist = self.get_r_cage() - 1.0
+            robots, robots_center = get_neighbors(self.current_scan, self.get_r_cage() - self.d_min)
 
         if self.state == State.APPROACH:
-            dist = get_distance(self.current_scan, 0)
-            if dist < desired_dist + 0.5:  # self.get_r_cage() - 0.5 * self.d_min:
-                self.near_object = True
+            if self.d_max <= 0.0:
+                dist = get_mean_dist(self.current_scan, -5, 60)
+                if dist > 2.3:
+                    self.near_object = False
+                for robot in robots_center:
+                    if np.deg2rad(350) < robot[1] < np.deg2rad(10):
+                        dist_valid = False
             else:
-                self.near_object = False
+                dist = get_distance(self.current_scan, 90)
+                if dist > self.get_r_cage() - 0.3:  # self.get_r_cage() - 0.5 * self.d_min:
+                    self.near_object = False
+                for robot in robots_center:
+                    if np.deg2rad(85) < robot[1] < np.deg2rad(95):
+                        dist_valid = False
 
+        if self.state == State.MOVE_AROUND_OBJECT:
+            dist = get_distance(self.current_scan, 90)
             for robot in robots_center:
-                if np.pi * 0.0 - 1 < robot[1] < np.pi * 0.0 + 1:
+                if np.deg2rad(75) < robot[1] < np.deg2rad(105):
                     dist_valid = False
+            if dist > 2.8 or not dist_valid:
+                self.near_object_counter += 1
+                if self.near_object_counter > 8:
+                    self.near_object_counter = 0
+                    self.near_object = False
+                    self.start_index_survey = np.inf
+                    self.d_min = 0.0
+                    self.d_max = 0.0
+                    self.e = 0.0
 
         elif self.state == State.SURROUND:
             dist = get_distance(self.current_scan, 90)
-            if dist < desired_dist + 1.0:  # self.get_r_cage():
-                self.near_object = True
-            else:
+            if dist > self.get_r_cage():
                 self.near_object = False
 
             for robot in robots_center:
-                if np.pi * 0.5 - 1 < robot[1] < np.pi * 0.5 + 1:
+                if np.deg2rad(85) < robot[1] < np.deg2rad(95):
                     dist_valid = False
 
         if not dist_valid:
             self.near_object = old_near_object
+
+    def update_shape_parameters(self, odometry_list):
+        x, y = get_shape_points(odometry_list)
+        img = rectify_img(points2image(x, y))
+        approx, self.d_min = get_approx_dmin(img, str(self.get_namespace())[-1])  # TODO: robotname wieder entfernen
+        self.d_max = get_dmax(approx2contour(approx), str(self.get_namespace())[-1])  # TODO: robotname wieder entfernen
+        self.e = self.d_max * 0.076
+        convex = cv.isContourConvex(approx)  # TODO: Hier wieder entfernen nur bei kombinierten von Nöten
+        area = cv.contourArea(approx)  # TODO: Hier wieder entfernen nur bei kombinierten von Nöten
+
+        self.publish_info("Shape Parameter:")
+        self.publish_info("d_max=" + str(self.d_max) + " d_min=" + str(self.d_min) + " e=" + str(self.e))
+        self.publish_info("convex=" + str(convex) + " area=" + str(area))
 
     def update_goal_position(self):
         x_list = []
@@ -1128,9 +1220,9 @@ class CagingPattern(MovementPattern):
 
     def gamma(self, q):
         if self.state == State.TRANSPORT:
-            # TODO: distance muss abhängig von object durchmesser gesetzt werden
-            #  oder über die Zeit des Transports verändert werden wenn sich das Objekt nicht bewegt
-            center = get_trajectory(self.current_object_center, self.goal_position, 0.75)
+            # TODO: distance muss abhängig von object durchmesser gesetzt werden - ist es aktuell
+            #  oder über die Zeit des Transports verändert werden wenn sich das Objekt nicht bewegt - vermutlich besser
+            center = get_trajectory(self.current_object_center, self.goal_position, self.d_min * 0.75)
         else:
             center = self.current_object_center
 
@@ -1201,66 +1293,6 @@ class CagingPattern(MovementPattern):
             result += np.subtract(minute, subtrahend)
 
         return result
-
-    # calculating the object shape (concave/convex, height, d_min, d_max, weight)
-    def moveAroundObject(self):
-        moveAroundObject = Twist()
-        # nur zu test zwecken
-        if len(self.odometry_list) > 0:
-            if self.start == np.inf:
-                self.start = len(self.odometry_list) - 1
-            elif self.start == -1:
-                return moveAroundObject
-
-            position = self.odometry_list[-1][0]
-            start_position = self.odometry_list[self.start][0]
-            distance_to_start = np.linalg.norm(np.subtract(position, start_position))
-
-            if self.start > 0 and len(self.odometry_list) > self.start + 300 and (
-                    len(self.odometry_list) > self.start + 1500 or distance_to_start < 0.01):
-                self.update_shape_parameters(self.odometry_list[self.start:-1])
-                self.start = -1
-            else:
-                moveAroundObject = self.wall_follow()
-
-        return moveAroundObject
-
-    def update_shape_parameters(self, odometry_list):
-        x, y = get_shape_points(odometry_list)
-        img = rectify_img(points2image(x, y))
-        approx, self.d_min = get_approx_dmin(img)
-        self.d_max = get_dmax(approx2contour(approx))
-        self.e = self.d_max * 0.076
-        convex = cv.isContourConvex(approx)  # TODO: Hier wieder entfernen nur bei kombinierten von Nöten
-        area = cv.contourArea(approx)  # TODO: Hier wieder entfernen nur bei kombinierten von Nöten
-
-        self.publish_info("Shape Parameter:")
-        self.publish_info("d_max=" + str(self.d_max) + " d_min=" + str(self.d_min) + " e=" + str(self.e))
-        self.publish_info("convex=" + str(convex) + " area=" + str(area))
-
-    def wall_follow(self):
-        """calculates the vector to follow the left wall"""
-        scan_msg = self.current_scan
-        left_mean_dist = get_mean_dist(scan_msg, 30, 80)
-        front_mean_dist = get_mean_dist(scan_msg, -30, 30)
-
-        desired_dist = 1.8  # desired distance to the wall
-        error = left_mean_dist - desired_dist
-
-        linear = self.param_max_translational_velocity
-        angular = error * 1.5
-
-        if front_mean_dist < desired_dist + 0.65:
-            # turn right:
-            angular = -1.0
-
-        linear, angular = self.scale_velocity(linear, angular)
-        wall_follow_direction = Twist()
-        wall_follow_direction.angular.z = angular
-        wall_follow_direction.linear.x = linear
-
-        return wall_follow_direction
-
 
 def main(args=None):
     """Create a node for the caging and handle the setup."""
