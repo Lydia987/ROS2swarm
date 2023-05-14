@@ -94,7 +94,7 @@ def rectify_img(img):
     return img
 
 
-def get_contours(img):
+def get_shape_contours(img):
     gray = cv.cvtColor(img, cv.COLOR_RGB2GRAY)
 
     for i in range(4):
@@ -122,7 +122,7 @@ def get_contours(img):
 
 
 def get_approx_dmin(img, robot_name):
-    contours = get_contours(img)
+    contours = get_shape_contours(img)
     contour = None
     w = 0.0
     w_new = 0.0
@@ -222,52 +222,29 @@ def get_neighbors(scan_msg, max_range):
     return robots, robots_center
 
 
-def get_centroid(img):
-    x = 0
-    y = 0
-
-    # Nur damit Kontur in anderer Farbe eingezeichnet werden kann TODO: wieder entfernen
-    img = cv.cvtColor(img, cv.COLOR_GRAY2RGB)
-
-    grey = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+def get_image_contour(img, lower_color, upper_color):
+    hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
+    grey = cv.inRange(hsv, lower_color, upper_color)
     median = cv.medianBlur(grey, 5)
     blurred = cv.GaussianBlur(median, (5, 5), 0)
     thresh = cv.threshold(blurred, 60, 255, cv.THRESH_BINARY)[1]
 
-    # find contours in the threshold image
     contours = cv.findContours(thresh.copy(), cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
     contours = imutils.grab_contours(contours)
-    it = 0
-    # loop over the contours
-    for c in contours:
-        it += 1
-        # compute the center of the contour
-        M = cv.moments(c)
-        if M["m00"] != 0:
-            x = int(M["m10"] / M["m00"])
-            y = int(M["m01"] / M["m00"])
-        # draw the contour and center of the shape on the image TODO: wieder entfernen
-        cv.drawContours(img, [c], -1, (255, 0, 0), 2)
-        cv.circle(img, (x, y), 7, (255, 0, 0), -1)
-        cv.putText(img, str(it), (x - 50, y - 50), cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+    # TODO: eventuell überprüfen ob mehr als eine contour gefunden wurde
+    return contours[0]
 
-    # speichert Bild TODO: wieder entfernen
-    cv.imwrite('Thresh.jpeg', thresh)
-    cv.imwrite('Center.jpeg', img)
+
+def get_center(contour):
+    x = 0
+    y = 0
+    M = cv.moments(contour)
+
+    if M["m00"] != 0:
+        x = int(M["m10"] / M["m00"])
+        y = int(M["m01"] / M["m00"])
 
     return x, y
-
-
-def get_distance(scan_msg, degree):
-    rad = np.deg2rad(degree)
-    increment = scan_msg.angle_increment
-    min_rad = scan_msg.angle_min
-    max_rad = scan_msg.angle_max
-    if rad < min_rad or rad > max_rad:
-        distance = np.inf
-    else:
-        distance = scan_msg.ranges[int((rad - min_rad) / increment)]
-    return distance
 
 
 def is_color_in_image(image, lower_color, upper_color):
@@ -282,9 +259,21 @@ def is_color_in_image(image, lower_color, upper_color):
     return is_in_image
 
 
+def get_distance(scan_msg, degree):
+    rad = np.deg2rad(degree)
+    increment = scan_msg.angle_increment
+    min_rad = scan_msg.angle_min
+    max_rad = scan_msg.angle_max
+    if rad < min_rad or rad > max_rad:
+        distance = np.inf
+    else:
+        distance = scan_msg.ranges[int((rad - min_rad) / increment)]
+    return distance
+
+
 def get_mean_dist(scan_msg, min_angle, max_angle):
     """ calculates the mean distance to obstacles between the min_angle and max_angle """
-    R = scan_msg.range_max  # repulsive force up to R in meter
+    R = scan_msg.range_max
     sum_dist = 0.0
     start_angle = np.deg2rad(min_angle)  # rad (front = 0 rad)
     end_angle = np.deg2rad(max_angle)  # rad (front = 0 rad)
@@ -412,8 +401,7 @@ class DynamicChangeTransportPattern(MovementPattern):
         # self.state_timer = Timer(0.01, self.dynamic_change)
         # self.state_timer.start()
 
-        self.search_object_timer = Timer(self.param_object_timer_period, self.is_object_visible,
-                                         args=(self.lower_object_color, self.upper_object_color))
+        self.search_object_timer = Timer(self.param_object_timer_period, self.is_object_visible)
         self.turn_timer = Timer(self.param_turn_timer_period, self.stop)
 
         # Variablen für das Testen und Auswerten
@@ -441,9 +429,7 @@ class DynamicChangeTransportPattern(MovementPattern):
         self.publish_state_counter -= 1
         if self.publish_state_counter <= 0:
             self.publish_state_counter = 10
-            self.info.data = '_____' + str(self.state) + '_____ near_object=' + str(
-                self.near_object) + ' object=' + str(
-                self.object_in_image)
+            self.info.data = '_____' + str(self.state) + '_____ height=' + str(self.object_height) + 'near_object=' + str(self.near_object) + ' object_in_image=' + str(self.object_in_image)
             self.information_publisher.publish(self.info)
 
     def publish_info(self, msg):
@@ -598,23 +584,21 @@ class DynamicChangeTransportPattern(MovementPattern):
     # BEWEGUNGSMUSTER #
     def approach(self):
         image = self.current_image
-
-        hsv = cv.cvtColor(image, cv.COLOR_BGR2HSV)
-        obj_mask = cv.inRange(hsv, self.lower_object_color, self.upper_object_color)
-        x, y = get_centroid(obj_mask)
-
-        cv.imwrite('Original.jpeg', image)
-        cv.imwrite('Maske.jpeg', obj_mask)
-
-        # normiert Wert: 1 (ganz links) und -1 (ganz rechts)
         img_width = image.shape[1]
+        contour = get_image_contour(image, self.lower_object_color, self.upper_object_color)
+        x, y = get_center(contour)
+        # normiert Wert: 1 (ganz links) und -1 (ganz rechts)
         turn_intensity_and_direction = (2 * x / img_width - 1) * -1
 
-        obj_direction = turn_intensity_and_direction * self.param_max_rotational_velocity
-
         approach = Twist()
-        approach.angular.z = obj_direction
+        approach.angular.z = turn_intensity_and_direction * self.param_max_rotational_velocity
         approach.linear.x = self.param_max_translational_velocity
+
+        # draw the contour and center of the shape on the image TODO: wieder entfernen
+        cv.drawContours(image, [contour], -1, (255, 0, 0), 2)
+        cv.circle(image, (x, y), 7, (255, 0, 0), -1)
+        cv.imwrite('Center.jpeg', image)
+
         return approach
 
     def survey_object(self):
@@ -688,10 +672,9 @@ class DynamicChangeTransportPattern(MovementPattern):
         else:
             return False
 
-    def is_object_visible(self, lower_color, upper_color):
+    def is_object_visible(self):
         self.search_object_timer.cancel()
-        self.search_object_timer = Timer(self.param_object_timer_period, self.is_object_visible,
-                                         args=(self.lower_object_color, self.upper_object_color))
+        self.search_object_timer = Timer(self.param_object_timer_period, self.is_object_visible)
 
         if (not self.turn_timer.is_alive()) and (self.state == State.SEARCH):
             # self.publish_info('!!!Starte Überprüfung auf OBJEKT!!!')
@@ -718,16 +701,40 @@ class DynamicChangeTransportPattern(MovementPattern):
         #  und wenn ja foto machen und contour bestimmen und daraus Höhe berechnen
         scan = self.current_scan
         img = self.current_image
+        dist = get_distance(scan, 0)
+
+        if dist >= scan.range_max:
+            return
+
         # Überprüfen ob roboter vor einem
-        # Ja, dann wars das
-        # Überprüfen ob Distanz nach vorne kleiner max_range des lasers
-        # Nein, dann wars das
-        # get object contour
-        # get smallest rectangle that contains contour
-        # setzte die höhe des rechtecks gleich der höhe des objekts
-        # multipliziere diese mit einem Faktor der die Pixel und die Distanz zum Objekt in Einklang bringt
-        # Camera module v 2.1: Horizontal field of view = 62.2 deg & Vertical field of view = 48.8 deg
-        self.object_height = 0.0
+        robots, robots_center = get_neighbors(scan, scan.range_max)
+        for robot in robots_center:
+            if np.deg2rad(355) < robot[1] < np.deg2rad(5):
+                return
+
+        contour = get_image_contour(img, self.lower_object_color, self.upper_object_color)
+        # get the height of the contour at the center of the picture
+        min_y = np.inf
+        max_y = 0.0
+        x_center = img.shape[0] / 2
+        for point in contour:
+            if point[0][0] == x_center:
+                if point[0][1] < min_y:
+                    min_y = point[0][1]
+                if point[0][1] > max_y:
+                    max_y = point[0][1]
+        height_px = max_y - min_y
+
+        # calculate pixel size
+        # Camera module v 2.1 TODO: Zu parameter machen
+        focal_length_mm = 3.04
+        sensor_height_mm = 2.76
+        img_height_px = img.shape[1]
+        v_resolution_px_per_mm = img_height_px / sensor_height_mm
+        v_resolution_rad = 2 * np.arctan((sensor_height_mm / 2) / focal_length_mm)
+        pixel_size = np.tan(v_resolution_rad) * dist / v_resolution_px_per_mm
+
+        self.object_height = height_px * pixel_size
 
     def update_is_near_object(self):
         old_near_object = self.near_object

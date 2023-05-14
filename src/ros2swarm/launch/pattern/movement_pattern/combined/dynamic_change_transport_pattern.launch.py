@@ -41,7 +41,7 @@ def generate_launch_description():
     )
     ld.add_action(ros2_pattern_subnode_random_walk)
 
-    ros2_pattern_subnode_pushing= launch_ros.actions.Node(
+    ros2_pattern_subnode_pushing = launch_ros.actions.Node(
         package='ros2swarm',
         executable='pushing_pattern',
         namespace=robot_namespace,
