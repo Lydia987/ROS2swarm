@@ -13,4 +13,5 @@
     random_walk_rot_interval: 3.5
     random_walk_lin_interval_min: 10.0
     random_walk_lin_interval_max: 15.0
-    # TODO: add object_name and goal_name
+    object_name: 'Green' # Gazebomodelname  # Green | Green_Quader_3x2 | Green_Quader_4x4x2 | unit_cylinder_radius_1,5m | concave
+    goal_name: 'Red' # Gazebomodelname

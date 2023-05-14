@@ -407,10 +407,14 @@ class CagingPattern(MovementPattern):
                 ('max_translational_velocity', None),
                 ('max_rotational_velocity', None),
                 ('robot_radius', None),
-                ('robot_length', None)
+                ('robot_length', None),
+                ('object_name', None),
+                ('goal_name', None)
             ])
 
         # PARAMS #
+        self.object_name = self.get_parameter("object_name").get_parameter_value().string_value
+        self.goal_name = self.get_parameter("goal_name").get_parameter_value().string_value
         self.param_max_translational_velocity = self.get_parameter(
             "max_translational_velocity").get_parameter_value().double_value
         self.param_max_rotational_velocity = self.get_parameter(
@@ -486,7 +490,6 @@ class CagingPattern(MovementPattern):
         # print(cv.cvtColor(np.uint8([[BGR]]),cv.COLOR_BGR2HSV))
 
         # OBJECT variables #
-        self.object_name = "Green_Quader_3x2"  # "concave" # "Green_Quader_3x2"  # "Green" #
         self.lower_object_color = np.array([50, 50, 50])  # np.array([50, 50, 50])  # in HSV [H-10, 100,100]
         self.upper_object_color = np.array([70, 255, 255])  # np.array([70, 255, 255])  # in HSV [H+10, 255, 255]
         self.near_object = False
@@ -497,7 +500,6 @@ class CagingPattern(MovementPattern):
         self.current_object_center = np.array([0.0, 0.0])
 
         # GOAL variables #
-        self.goal_name = "Red"
         self.lower_goal_color = np.array([110, 100, 100])  # np.array([0, 50, 50])  # in HSV [H-10, 100,100]
         self.upper_goal_color = np.array([130, 255, 255])  # np.array([10, 255, 255])  # in HSV [H+10, 255, 255]
         self.goal_in_image = False

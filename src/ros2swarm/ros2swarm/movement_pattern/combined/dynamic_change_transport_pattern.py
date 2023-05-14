@@ -318,10 +318,17 @@ class DynamicChangeTransportPattern(MovementPattern):
                 ('max_rotational_velocity', None),
                 ('robot_radius', None),
                 ('robot_length', None),
-                ('max_transport_time', None)
+                ('max_transport_time', None),
+                ('max_detectable_height', None),
+                ('min_detectable_height', None),
+                ('pixel_size', None),
+                ('object_name', None),
+                ('goal_name', None)
             ])
 
         # PARAMS #
+        self.object_name = self.get_parameter("object_name").get_parameter_value().string_value
+        self.goal_name = self.get_parameter("goal_name").get_parameter_value().string_value
         self.param_max_translational_velocity = self.get_parameter(
             "max_translational_velocity").get_parameter_value().double_value
         self.param_max_rotational_velocity = self.get_parameter(
@@ -332,6 +339,9 @@ class DynamicChangeTransportPattern(MovementPattern):
         self.r = self.get_parameter("robot_radius").get_parameter_value().double_value
         self.l = self.get_parameter("robot_length").get_parameter_value().double_value
         self.max_transport_time = self.get_parameter("max_transport_time").get_parameter_value().double_value
+        self.max_detectable_height = self.get_parameter("max_detectable_height").get_parameter_value().double_value
+        self.min_detectable_height = self.get_parameter("min_detectable_height").get_parameter_value().double_value
+        self.pixel_size = self.get_parameter("pixel_size").get_parameter_value().double_value
 
         # SUBPATTERN #
         self.random_walk_latest = Twist()
@@ -375,11 +385,6 @@ class DynamicChangeTransportPattern(MovementPattern):
         self.max_transport_time_reached = False
         self.transport_start_time = None
 
-        # Trutlebot WafflePi TODO: Zu parameter machen
-        self.max_detectable_height = 1.4
-        self.min_detectable_height = 0.11
-        self.pixel_size = 0.0058
-
         # color in RGB = [76, 142, 24] , in BGR = [24, 142, 76] and in HSV = [47 212 142]
         # [100, 50, 50] bis [140, 255, 255] entspricht rot, aber warum ???
         # [50, 100, 100] bis [70, 255, 255] entspricht grün
@@ -406,16 +411,11 @@ class DynamicChangeTransportPattern(MovementPattern):
         self.search_object_timer = Timer(self.param_object_timer_period, self.is_object_visible)
         self.turn_timer = Timer(self.param_turn_timer_period, self.stop)
 
-        # Variablen für das Testen und Auswerten
-        self.publish_state_counter = 0
-
+        # ZUM TESTEN UND AUSWERTEN #
         # 0 = time, 1 = velocity, 2 = state, 3 = pose, 4 = object_center, 5 = goal_position]
         self.state_list = [[], [[], []], [], [[], [], []], [[], []], [[], []]]
-
-        # ZUM TESTEN UND AUSWERTEN #
-        self.object_name = "Green_Quader_2x2x0.5"  # Green | Green_Quader_3x2 | Green_Quader_4x4x2 | unit_cylinder_radius_1,5m | concave
+        self.publish_state_counter = 0
         self.current_object_center = [[], []]
-        self.goal_name = "Red"
         self.goal_position = [[], []]
         self.current_pose = [[], [], []]
 

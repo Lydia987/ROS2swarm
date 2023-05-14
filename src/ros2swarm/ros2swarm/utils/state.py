@@ -37,9 +37,9 @@ class State(Enum):
     START_CHAMBER = 15
     SEARCH_WALL = 16
     TUNNEL_CORNER = 17
-    SEARCH_OBJECT = 18
-    APPROACH_OBJECT = 19
-    PUSH_OBJECT = 20
+    MOVE_AROUND_OBJECT = 18
+    STOP = 19
+    PUSH = 20
     SURVEY_OBJECT = 21
     CHECK_FOR_OBJECT = 22
     CHECK_FOR_GOAL = 23
@@ -49,5 +49,5 @@ class State(Enum):
     TRANSPORT = 27
     CAGING = 28
     PUSHING = 29
-    STOP = 30
-    MOVE_AROUND_OBJECT = 31
+
+
