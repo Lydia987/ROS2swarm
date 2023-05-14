@@ -166,7 +166,7 @@ class PushingPattern(MovementPattern):
         self.random_walk_latest.angular.z = random.randint(-1, 2) * random.randint(1, 11) * 0.1 * self.param_max_rotational_velocity
 
         # TODO: wieder entfernen, wenn timer einkommentiert
-        self.pushing()
+        # self.pushing()
 
     def camera_callback(self, raw_image_msg: Image):
         """Call back if a new scan msg is available."""
@@ -178,7 +178,7 @@ class PushingPattern(MovementPattern):
         self.info.data = 'BUSY= ' + str(self.is_busy()) + ' turn= ' + str(
             self.turn_timer.is_alive()) + ' target= ' + str(self.search_goal_timer.is_alive()) + ' object= ' + str(
             self.search_object_timer.is_alive()) + ' wall= ' + str(self.move_around_object_timer.is_alive())
-        self.information_publisher.publish(self.info)
+        # self.information_publisher.publish(self.info)
 
     def pushing(self):
         old_state = self.state
@@ -207,7 +207,7 @@ class PushingPattern(MovementPattern):
             self.counter = 10
             self.info.data = '_____' + str(self.state) + '_____ target=' + str(self.goal_is_occluded) + ' object=' + str(
                 self.object_in_image)  # + ' dist=' + str(self.object_distance)
-            self.information_publisher.publish(self.info)
+            # self.information_publisher.publish(self.info)
 
         self.execute_state()
 
@@ -331,7 +331,7 @@ class PushingPattern(MovementPattern):
         if not obstacle_free:
             self.command_publisher.publish(backwards)
             self.info.data = 'backwards START'
-            self.information_publisher.publish(self.info)
+            # self.information_publisher.publish(self.info)
             time.sleep(1.2)  # TODO: param daraus machen der in der Yaml datei steht
 
     def turn_once(self):
@@ -343,7 +343,7 @@ class PushingPattern(MovementPattern):
         self.turn_timer.start()
 
         self.info.data = 'turn_timer START'
-        self.information_publisher.publish(self.info)
+        # self.information_publisher.publish(self.info)
 
     def is_object_visible(self, lower_color, upper_color):
         self.search_object_timer.cancel()
@@ -354,7 +354,7 @@ class PushingPattern(MovementPattern):
 
         if (not self.turn_timer.is_alive()) and self.state == State.SEARCH_OBJECT:
             self.info.data = '!!!Starte Überprüfung auf OBJEKT!!!'
-            self.information_publisher.publish(self.info)
+            # self.information_publisher.publish(self.info)
             self.turn_once()
             for i in range(0, 1000):
                 time.sleep(0.1)
@@ -364,20 +364,20 @@ class PushingPattern(MovementPattern):
 
                 if not self.turn_timer.is_alive():
                     self.info.data = '!!!KEIN OBJEKT in Sicht!!!'
-                    self.information_publisher.publish(self.info)
+                    # self.information_publisher.publish(self.info)
 
                     in_image = False
                     break
 
                 elif in_image:
                     self.info.data = '!!!OBJEKT in Sicht!!!'
-                    self.information_publisher.publish(self.info)
+                    # self.information_publisher.publish(self.info)
 
                     in_image = True
                     self.turn_timer.cancel()
                     self.turn_timer = Timer(self.param_turn_timer_period, self.stop)
                     self.info.data = 'Der turn_timer wurde gecancelt'
-                    self.information_publisher.publish(self.info)
+                    # self.information_publisher.publish(self.info)
                     self.stop()
                     break
 
@@ -397,7 +397,7 @@ class PushingPattern(MovementPattern):
 
         if (not self.turn_timer.is_alive()) and (not self.has_neighbors(scan_msg)) and ((self.state == State.PUSH_OBJECT) or (self.state == State.CHECK_FOR_GOAL)):
             self.info.data = '!!!Starte Überprüfung auf ZIEL!!'
-            self.information_publisher.publish(self.info)
+            # self.information_publisher.publish(self.info)
             self.drive_backwards()
             self.turn_once()
             for i in range(0, 1000):
@@ -410,10 +410,10 @@ class PushingPattern(MovementPattern):
 
             if not occluded:
                 self.info.data = '!!!ZIEL in Sicht!!!'
-                self.information_publisher.publish(self.info)
+                # self.information_publisher.publish(self.info)
             else:
                 self.info.data = '!!!KEIN ZIEL in Sicht!!!'
-                self.information_publisher.publish(self.info)
+                # self.information_publisher.publish(self.info)
 
         self.goal_is_occluded = occluded
 

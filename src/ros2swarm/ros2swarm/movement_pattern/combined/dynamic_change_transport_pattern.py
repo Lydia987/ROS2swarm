@@ -231,8 +231,11 @@ def get_image_contour(img, lower_color, upper_color):
 
     contours = cv.findContours(thresh.copy(), cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
     contours = imutils.grab_contours(contours)
-    # TODO: eventuell überprüfen ob mehr als eine contour gefunden wurde
-    return contours[0]
+    # TODO: eventuell überprüfen ob mehr als eine contour gefunden wurde oder keine
+    if len(contours) == 1:
+        return contours[0]
+    else:
+        return None
 
 
 def get_center(contour):
@@ -355,12 +358,6 @@ class DynamicChangeTransportPattern(MovementPattern):
         self.camera_subscription = self.create_subscription(
             Image, self.get_namespace() + '/camera/image_raw', self.swarm_command_controlled(self.camera_callback),
             qos_profile=qos_profile_sensor_data)
-        self.quorum_subscription = self.create_subscription(
-            StringMessage, '/quorum', self.quorum_callback, 10)
-        self.quorum_publisher = self.create_publisher(
-            StringMessage, '/quorum', 10)
-        self.goal_subscription = self.create_subscription(
-            StringMessage, '/goal', self.goal_callback, 10)
 
         # PUBLISHER #
         self.information_publisher = self.create_publisher(
@@ -377,6 +374,11 @@ class DynamicChangeTransportPattern(MovementPattern):
         self.start_index_survey = np.inf  # index of the list at which the survey of the object was started
         self.max_transport_time_reached = False
         self.transport_start_time = None
+
+        # Trutlebot WafflePi TODO: Zu parameter machen
+        self.max_detectable_height = 1.4
+        self.min_detectable_height = 0.11
+        self.pixel_size = 0.0058
 
         # color in RGB = [76, 142, 24] , in BGR = [24, 142, 76] and in HSV = [47 212 142]
         # [100, 50, 50] bis [140, 255, 255] entspricht rot, aber warum ???
@@ -410,6 +412,13 @@ class DynamicChangeTransportPattern(MovementPattern):
         # 0 = time, 1 = velocity, 2 = state, 3 = pose, 4 = object_center, 5 = goal_position]
         self.state_list = [[], [[], []], [], [[], [], []], [[], []], [[], []]]
 
+        # ZUM TESTEN UND AUSWERTEN #
+        self.object_name = "Green_Quader_2x2x0.5"  # Green | Green_Quader_3x2 | Green_Quader_4x4x2 | unit_cylinder_radius_1,5m | concave
+        self.current_object_center = [[], []]
+        self.goal_name = "Red"
+        self.goal_position = [[], []]
+        self.current_pose = [[], [], []]
+
     # PUBLISHER #
     def publish_state(self):
         self.state_list[0].append([time.time()])
@@ -429,7 +438,7 @@ class DynamicChangeTransportPattern(MovementPattern):
         self.publish_state_counter -= 1
         if self.publish_state_counter <= 0:
             self.publish_state_counter = 10
-            self.info.data = '_____' + str(self.state) + '_____ height=' + str(self.object_height) + 'near_object=' + str(self.near_object) + ' object_in_image=' + str(self.object_in_image)
+            self.info.data = '_____' + str(self.state) + '_____ height=' + str(self.object_height) + ' near_object=' + str(self.near_object) + ' object_in_image=' + str(self.object_in_image)
             self.information_publisher.publish(self.info)
 
     def publish_info(self, msg):
@@ -543,8 +552,10 @@ class DynamicChangeTransportPattern(MovementPattern):
                     self.state = State.APPROACH
                 elif self.caging:
                     self.state = State.CAGING
+                    self.state = State.STOP  # TODO: Entfernen nur zu testzwecken
                 elif self.pushing:
                     self.state = State.PUSHING
+                    self.state = State.STOP  # TODO: Entfernen nur zu testzwecken
 
             elif self.state == State.PUSHING or self.state == State.CAGING:
                 if self.max_transport_time_reached:
@@ -564,7 +575,7 @@ class DynamicChangeTransportPattern(MovementPattern):
             self.direction = self.random_walk_latest
 
         elif self.state == State.APPROACH:
-            self.update_object_height()
+            self.get_object_height()
             self.direction = self.approach()
 
         elif self.state == State.SURVEY_OBJECT:
@@ -586,18 +597,20 @@ class DynamicChangeTransportPattern(MovementPattern):
         image = self.current_image
         img_width = image.shape[1]
         contour = get_image_contour(image, self.lower_object_color, self.upper_object_color)
-        x, y = get_center(contour)
-        # normiert Wert: 1 (ganz links) und -1 (ganz rechts)
-        turn_intensity_and_direction = (2 * x / img_width - 1) * -1
+        if contour is not None:
+            x, y = get_center(contour)
+            # normiert Wert: 1 (ganz links) und -1 (ganz rechts)
+            turn_intensity_and_direction = (2 * x / img_width - 1) * -1
+            # draw the contour and center of the shape on the image TODO: wieder entfernen
+            cv.drawContours(image, [contour], -1, (255, 0, 0), 2)
+            cv.circle(image, (x, y), 7, (255, 0, 0), -1)
+            cv.imwrite('ApproachCenter.jpeg', image)
+        else:
+            turn_intensity_and_direction = 0.0
 
         approach = Twist()
         approach.angular.z = turn_intensity_and_direction * self.param_max_rotational_velocity
         approach.linear.x = self.param_max_translational_velocity
-
-        # draw the contour and center of the shape on the image TODO: wieder entfernen
-        cv.drawContours(image, [contour], -1, (255, 0, 0), 2)
-        cv.circle(image, (x, y), 7, (255, 0, 0), -1)
-        cv.imwrite('Center.jpeg', image)
 
         return approach
 
@@ -696,9 +709,11 @@ class DynamicChangeTransportPattern(MovementPattern):
 
         self.search_object_timer.start()
 
-    def update_object_height(self):
-        # TODO: Überprüfen ob scanner schon Distanz zum Objekt messen kann
-        #  und wenn ja foto machen und contour bestimmen und daraus Höhe berechnen
+    def get_object_height(self):
+
+        if self.object_height >= self.min_detectable_height:
+            return
+
         scan = self.current_scan
         img = self.current_image
         dist = get_distance(scan, 0)
@@ -710,31 +725,41 @@ class DynamicChangeTransportPattern(MovementPattern):
         robots, robots_center = get_neighbors(scan, scan.range_max)
         for robot in robots_center:
             if np.deg2rad(355) < robot[1] < np.deg2rad(5):
+                self.publish_info("robot front: " + str(np.rad2deg(robot[1])))
                 return
 
         contour = get_image_contour(img, self.lower_object_color, self.upper_object_color)
+        if contour is None:
+            self.publish_info("contour is None")
+            return
+
+        cv.drawContours(img, [contour], -1, (255, 0, 0), 2)
+        cv.imwrite('height.jpeg', img)  # TODO: wieder entfernen
+
         # get the height of the contour at the center of the picture
-        min_y = np.inf
-        max_y = 0.0
-        x_center = img.shape[0] / 2
-        for point in contour:
-            if point[0][0] == x_center:
-                if point[0][1] < min_y:
-                    min_y = point[0][1]
-                if point[0][1] > max_y:
-                    max_y = point[0][1]
+        min_y = img.shape[0]
+        max_y = 0
+        x_center = int(img.shape[1] / 2)
+        for y in range(img.shape[0]):
+            b, g, r = img[y, x_center]
+            if b > 150 and g < 50 and r < 50:
+                if y < min_y:
+                    min_y = y
+                if y > max_y:
+                    max_y = y
+
         height_px = max_y - min_y
+        self.publish_info("height_px = " + str(height_px))
+        self.publish_info("dist = " + str(dist))
+        height = height_px * self.pixel_size
+        self.publish_info("height = " + str(height))
 
-        # calculate pixel size
-        # Camera module v 2.1 TODO: Zu parameter machen
-        focal_length_mm = 3.04
-        sensor_height_mm = 2.76
-        img_height_px = img.shape[1]
-        v_resolution_px_per_mm = img_height_px / sensor_height_mm
-        v_resolution_rad = 2 * np.arctan((sensor_height_mm / 2) / focal_length_mm)
-        pixel_size = np.tan(v_resolution_rad) * dist / v_resolution_px_per_mm
+        if height > self.max_detectable_height:
+            height = np.inf
+        elif height < self.min_detectable_height:
+            height = 0.0
 
-        self.object_height = height_px * pixel_size
+        self.object_height = height
 
     def update_is_near_object(self):
         old_near_object = self.near_object
@@ -788,7 +813,12 @@ class DynamicChangeTransportPattern(MovementPattern):
         d_max = get_dmax(approx2contour(approx), str(self.get_namespace())[-1])  # TODO: robotname wieder entfernen
         convex = cv.isContourConvex(approx)
         area = cv.contourArea(approx)
-        weight = area * self.object_height * self.density
+        if self.object_height < self.min_detectable_height:
+            weight = area * self.min_detectable_height * self.density  # max
+        elif self.object_height > self.max_detectable_height:
+            weight = area * self.max_detectable_height * self.density  # min
+        else:
+            weight = area * self.object_height * self.density
         e = d_max * 0.076
         r_cage = 0.5 * d_max + self.r + self.l + e
         min_robots_caging = (2 * np.pi * r_cage) / (2 * self.r + d_min)
@@ -809,7 +839,7 @@ class DynamicChangeTransportPattern(MovementPattern):
         self.caging = caging
 
         self.publish_info("Shape Parameter:")
-        self.publish_info("d_max=" + str(self.d_max) + " d_min=" + str(self.d_min) + " e=" + str(self.e))
+        self.publish_info("d_max=" + str(d_max) + " d_min=" + str(d_min) + " e=" + str(e))
         self.publish_info("convex=" + str(convex) + " area=" + str(area) + " height=" + str(self.object_height))
 
     def scale_velocity(self, translational_velocity, rotational_velocity):

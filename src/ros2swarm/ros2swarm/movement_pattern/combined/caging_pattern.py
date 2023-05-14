@@ -565,14 +565,14 @@ class CagingPattern(MovementPattern):
         with open('state_list_' + str(self.get_namespace())[-1] + '.txt', 'w') as doc:
             doc.write(str(self.state_list))
 
-        self.publish_state_counter -= 1
-        if self.publish_state_counter <= 0:
-            self.publish_state_counter = 10
-            self.info.data = '_____' + str(self.state) + '_____ near_object=' + str(
-                self.near_object) + ' object=' + str(
-                self.object_in_image) + ' distance=' + str(self.object_distance) + ' quorum=' + str(
-                self.quorum) + ' closure=' + str(self.closure)
-            self.information_publisher.publish(self.info)
+        # self.publish_state_counter -= 1
+        # if self.publish_state_counter <= 0:
+        #     self.publish_state_counter = 10
+        #     self.info.data = '_____' + str(self.state) + '_____ near_object=' + str(
+        #         self.near_object) + ' object=' + str(
+        #         self.object_in_image) + ' distance=' + str(self.object_distance) + ' quorum=' + str(
+        #         self.quorum) + ' closure=' + str(self.closure)
+        #     self.information_publisher.publish(self.info)
 
     def publish_info(self, msg):
         self.info.data = str(msg)
@@ -732,14 +732,14 @@ class CagingPattern(MovementPattern):
                     self.state = State.SURROUND
 
         if old_state == State.SURROUND and self.state != State.APPROACH and self.surround_switch_counter < 15:
-            self.publish_info("state_switch_counter")
+            # self.publish_info("state_switch_counter")
             self.surround_switch_counter += 1
             self.state = old_state
         else:
             self.surround_switch_counter = 0
 
         if old_state == State.TRANSPORT and self.state != State.TRANSPORT and self.transport_switch_counter < 40:
-            self.publish_info("state_switch_counter")
+            # self.publish_info("state_switch_counter")
             self.transport_switch_counter += 1
             self.state = old_state
         else:
@@ -1054,9 +1054,9 @@ class CagingPattern(MovementPattern):
         convex = cv.isContourConvex(approx)  # TODO: Hier wieder entfernen nur bei kombinierten von Nöten
         area = cv.contourArea(approx)  # TODO: Hier wieder entfernen nur bei kombinierten von Nöten
 
-        self.publish_info("Shape Parameter:")
-        self.publish_info("d_max=" + str(self.d_max) + " d_min=" + str(self.d_min) + " e=" + str(self.e))
-        self.publish_info("convex=" + str(convex) + " area=" + str(area))
+        # self.publish_info("Shape Parameter:")
+        # self.publish_info("d_max=" + str(self.d_max) + " d_min=" + str(self.d_min) + " e=" + str(self.e))
+        # self.publish_info("convex=" + str(convex) + " area=" + str(area))
 
     def update_goal_position(self):
         x_list = []
