@@ -21,6 +21,7 @@ from cv_bridge import CvBridge
 
 bridge = CvBridge()
 
+
 # TODO: Schwerpunkt von concave noch richtig setzten
 # TODO: bei transport trotzdem noch hardware_protection, aber nur wenn auf der rechten seite des Roboters ein Hindernis ist
 # TODO: Fehleranfälligkeit bei zu vielen Robotern reduzieren durch raushalten eines Roboters aus dem Transport,
@@ -171,16 +172,16 @@ def get_approx_dmin(img, robot_name):
     cv.drawContours(img, [approx], -1, (0, 0, 255), 2)
     cv.imwrite("/home/lydia/Bilder/AusgewerteteShape" + robot_name + ".jpeg", img)  # TODO: wieder entfernen
 
-    return approx, d_min/100
+    return approx, d_min / 100
 
 
 def approx2contour(approx):
     contour = []
     line_points = []
 
-    for i in range(len(approx)-1):
+    for i in range(len(approx) - 1):
         p1 = approx[i][0]
-        p2 = approx[i+1][0]
+        p2 = approx[i + 1][0]
         # Bestimmung der Steigung
         if p2[0] - p1[0] != 0:
             m = (p2[1] - p1[1]) / (p2[0] - p1[0])
@@ -227,7 +228,7 @@ def get_dmax(contour, robot_name):
     cv.line(img, max_line[0], max_line[1], (255, 255, 0), 2)
     cv.imwrite("/home/lydia/Bilder/AusgewerteteShape" + robot_name + ".jpeg", img)
 
-    return d_max/100
+    return d_max / 100
 
 
 def get_neighbors(scan_msg, max_range):
@@ -406,6 +407,7 @@ class CagingPattern(MovementPattern):
                 ('object_search_timer_period', None),
                 ('max_translational_velocity', None),
                 ('max_rotational_velocity', None),
+                ('max_transport_time', None),
                 ('robot_radius', None),
                 ('robot_length', None),
                 ('object_name', None),
@@ -425,6 +427,7 @@ class CagingPattern(MovementPattern):
             "object_search_timer_period").get_parameter_value().double_value
         self.r = self.get_parameter("robot_radius").get_parameter_value().double_value
         self.l = self.get_parameter("robot_length").get_parameter_value().double_value
+        self.max_transport_time = self.get_parameter("max_transport_time").get_parameter_value().double_value
 
         # SUBPATTERN #
         self.random_walk_latest = Twist()
@@ -463,8 +466,11 @@ class CagingPattern(MovementPattern):
         self.surround_switch_counter = 0
         self.quorum_switch_counter = 0
 
+        # GENERAL #
         self.direction = Twist()
         self.state = State.INIT
+        self.max_transport_time_reached = False
+        self.transport_start_time = None
         self.current_scan = None
         self.current_image = None
         self.last_error = 0.0
@@ -497,7 +503,7 @@ class CagingPattern(MovementPattern):
         self.object_in_image = False
         self.object_direction = None
         self.object_distance = np.inf
-        self.current_object_center = np.array([0.0, 0.0])
+        self.current_object_center = np.array([0.0, 0.0, 0.0])
 
         # GOAL variables #
         self.lower_goal_color = np.array([110, 100, 100])  # np.array([0, 50, 50])  # in HSV [H-10, 100,100]
@@ -532,9 +538,9 @@ class CagingPattern(MovementPattern):
         self.robots_in_quorum = 0
         self.error_list = []
         self.should_orientation = 0.0
-        # 0 = time, 1 = velocity, 2 = state, 3 = pose, 4 = object_center, 5 = error, 6 = should_orientation,
-        # 7 = #robots in quorum, 8 = goal_position, 9 = quorum, 10 = closure, 11 = caging_parameter]
-        self.state_list = [[], [[], []], [], [[], [], []], [[], []], [], [], [], [[], []], [], [], []]
+        # 0 = time, 1 = velocity, 2 = state, 3 = pose, 4 = object_center, 5 zu 8= error, 6 = should_orientation,
+        # 7 = #robots in quorum, 8 zu 5 = goal_position, 9 = quorum, 10 = closure, 11 = caging_parameter]
+        self.state_list = [[], [[], []], [], [[], [], []], [[], [], []], [[], []], [], [], [], [], [], []]
 
     # PUBLISHER #
     def publish_state(self):
@@ -547,11 +553,12 @@ class CagingPattern(MovementPattern):
         self.state_list[3][2].append(np.rad2deg(self.current_pose[2]))
         self.state_list[4][0].append(self.current_object_center[0])
         self.state_list[4][1].append(self.current_object_center[1])
-        self.state_list[5].append([self.last_error])
+        self.state_list[4][2].append(np.rad2deg(self.current_object_center[2]))
+        self.state_list[5][0].append(self.goal_position[0])
+        self.state_list[5][1].append(self.goal_position[1])
         self.state_list[6].append([self.should_orientation])
         self.state_list[7].append([self.robots_in_quorum])
-        self.state_list[8][0].append(self.goal_position[0])
-        self.state_list[8][1].append(self.goal_position[1])
+        self.state_list[8].append([self.last_error])
         self.state_list[9].append([int(self.quorum)])
         self.state_list[10].append([int(self.closure)])
         self.state_list[11].append([self.d_min, self.d_max, self.e, self.get_r_cage()])
@@ -564,7 +571,7 @@ class CagingPattern(MovementPattern):
         #     self.state_list[11][1].append(0.0)
         #     self.state_list[11][2].append(0.0)
 
-        with open('state_list_' + str(self.get_namespace())[-1] + '.txt', 'w') as doc:
+        with open('caging_state_list_' + str(self.get_namespace())[-1] + '.txt', 'w') as doc:
             doc.write(str(self.state_list))
 
         # self.publish_state_counter -= 1
@@ -600,7 +607,14 @@ class CagingPattern(MovementPattern):
                 self.current_object_center[0] = model_states.pose[index].position.x
                 self.current_object_center[1] = model_states.pose[index].position.y
 
-            # TODO: wieder auskommentieren, wenn die Zielabschätzung besser ist
+                z = model_states.pose[index].orientation.z
+                w = model_states.pose[index].orientation.w
+
+                if np.sign(z) < 0:  # clockwise
+                    self.current_object_center[2] = 2 * np.pi - 2 * np.arccos(w)
+                else:  # anticlockwise
+                    self.current_object_center[2] = 2 * np.arccos(w)
+
             elif name == self.goal_name:
                 self.goal_position[0] = model_states.pose[index].position.x
                 self.goal_position[1] = model_states.pose[index].position.y
@@ -651,7 +665,9 @@ class CagingPattern(MovementPattern):
         # self.command_publisher.publish(self.direction)
 
         # self.publish_info('caging')
-        if self.is_busy():
+        if self.max_transport_time_reached:
+            self.state = State.STOP
+        elif self.is_busy():
             return
 
         self.update_flags()
@@ -663,6 +679,8 @@ class CagingPattern(MovementPattern):
         # self.publish_info('update_flags')
         old_quorum = self.quorum
         old_goal_in_image = self.goal_in_image
+
+        self.update_is_max_transport_time_reached()
 
         if self.state == State.SEARCH:  # or self.state == State.APPROACH:
             self.update_object_infos(self.current_scan, self.current_image, self.lower_object_color,
@@ -1221,9 +1239,9 @@ class CagingPattern(MovementPattern):
     def gamma(self, q):
         if self.state == State.TRANSPORT:
             # TODO: eventuell 0.75 noch erhöhen oder verringern
-            center = get_trajectory(self.current_object_center, self.goal_position, self.d_min * 0.75)
+            center = get_trajectory(self.current_object_center[:2], self.goal_position, self.d_min * 0.75)
         else:
-            center = self.current_object_center
+            center = self.current_object_center[:2]
 
         return s(q[0], q[1], self.get_r_cage(), center)
 
@@ -1292,6 +1310,11 @@ class CagingPattern(MovementPattern):
             result += np.subtract(minute, subtrahend)
 
         return result
+
+    def update_is_max_transport_time_reached(self):
+        if self.transport_start_time is None:
+            self.transport_start_time = time.time()
+
 
 def main(args=None):
     """Create a node for the caging and handle the setup."""

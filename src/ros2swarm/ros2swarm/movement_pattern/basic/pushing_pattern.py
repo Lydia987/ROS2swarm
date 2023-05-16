@@ -1,3 +1,4 @@
+from gazebo_msgs.msg import ModelStates
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import LaserScan
 from sensor_msgs.msg import Image
@@ -108,17 +109,16 @@ def get_distance(scan_msg, degree):
 
 
 def has_neighbors(scan_msg):
-    # TODO: effizientere Variante finden
-    # center: erster wert entfernung in meter , zweiter wert rad (vorne 0, links rum steigend bis 2pi)
-    # roboter werden zwischen 0.2m und 3m erkannt min_range=0, max_range=3, threshold=0.35, min_width=0, max_width=15
+    # center: erster wert entfernung in meter, zweiter wert rad (vorne 0, links rum steigend bis 2pi)
+    # roboter werden zwischen 0,2 m und 3 m erkannt min_range=0, max_range=3, threshold=0.35, min_width=0, max_width=15
     robots, robots_center = ScanCalculationFunctions.identify_robots(laser_scan=scan_msg, min_range=0, max_range=3, threshold=0.35, min_width=0, max_width=15)
     left = 0
     right = 0
 
     for robot in robots_center:
-        if np.deg2rad(110) > robot[1] > np.deg2rad(10):
+        if np.deg2rad(160) > robot[1] > np.deg2rad(5):
             left += 1
-        elif np.deg2rad(350) > robot[1] > np.deg2rad(250):
+        elif np.deg2rad(355) > robot[1] > np.deg2rad(200):
             right += 1
 
     if left > 0 and right > 0:
@@ -151,25 +151,33 @@ class PushingPattern(MovementPattern):
             namespace='',
             parameters=[
                 ('turn_timer_period', None),
-                ('target_search_timer_period', None),
+                ('goal_search_timer_period', None),
                 ('object_search_timer_period', None),
                 ('wall_follow_timer_period', None),
+                ('max_transport_time', None),
                 ('max_translational_velocity', None),
-                ('max_rotational_velocity', None)
+                ('max_rotational_velocity', None),
+                ('object_name', None),
+                ('goal_name', None)
             ])
 
+        # PARAMS #
+        self.object_name = self.get_parameter("object_name").get_parameter_value().string_value
+        self.goal_name = self.get_parameter("goal_name").get_parameter_value().string_value
         self.param_max_translational_velocity = self.get_parameter(
             "max_translational_velocity").get_parameter_value().double_value
         self.param_max_rotational_velocity = self.get_parameter(
             "max_rotational_velocity").get_parameter_value().double_value
         self.param_turn_timer_period = self.get_parameter(
             "turn_timer_period").get_parameter_value().double_value
-        self.param_target_timer_period = self.get_parameter(
-            "target_search_timer_period").get_parameter_value().double_value
+        self.param_goal_timer_period = self.get_parameter(
+            "goal_search_timer_period").get_parameter_value().double_value
         self.param_object_timer_period = self.get_parameter(
             "object_search_timer_period").get_parameter_value().double_value
         self.param_move_around_object_timer_period = self.get_parameter(
             "wall_follow_timer_period").get_parameter_value().double_value
+        self.max_transport_time = self.get_parameter("max_transport_time").get_parameter_value().double_value
+
 
         # SUBPATTERN #
         self.random_walk_latest = Twist()
@@ -189,6 +197,8 @@ class PushingPattern(MovementPattern):
         self.current_scan = None
         self.current_image = None
         self.direction = Twist()
+        self.max_transport_time_reached = False
+        self.transport_start_time = None
 
         # color in RGB = [76, 142, 24] , in BGR = [24, 142, 76] and in HSV = [47 212 142]
         # [100, 50, 50] bis [140, 255, 255] entspricht rot, aber warum ???
@@ -216,7 +226,7 @@ class PushingPattern(MovementPattern):
         self.protection_publisher.publish(self.protection)
 
         # TIMER #
-        self.search_goal_timer = Timer(self.param_target_timer_period, self.is_goal_occluded)
+        self.search_goal_timer = Timer(self.param_goal_timer_period, self.is_goal_occluded)
         self.search_object_timer = Timer(self.param_object_timer_period, self.is_object_visible)
         self.turn_timer = Timer(self.param_turn_timer_period, self.stop)
         self.move_around_object_timer = Timer(self.param_move_around_object_timer_period, self.stop)
@@ -225,10 +235,13 @@ class PushingPattern(MovementPattern):
         self.state_switch_counter = 0
 
         # TEST und AUSWERTUNG #
+        self.model_states_subscription = self.create_subscription(ModelStates, '/gazebo/model_states',
+                                                                  self.model_states_callback,
+                                                                  qos_profile=qos_profile_sensor_data)
         # 0 = time, 1 = velocity, 2 = state, 3 = pose, 4 = object_center, 5 = goal_position]
-        self.state_list = [[], [[], []], [], [[], [], []], [[], []], [[], []]]
+        self.state_list = [[], [[], []], [], [[], [], []], [[], [], []], [[], []]]
         self.publish_state_counter = 0
-        self.current_object_center = [[], []]
+        self.current_object_center = [[], [], []]
         self.goal_position = [[], []]
         self.current_pose = [[], [], []]
 
@@ -243,6 +256,7 @@ class PushingPattern(MovementPattern):
         self.state_list[3][2].append(np.rad2deg(self.current_pose[2]))
         self.state_list[4][0].append(self.current_object_center[0])
         self.state_list[4][1].append(self.current_object_center[1])
+        self.state_list[4][2].append(np.rad2deg(self.current_object_center[2]))
         self.state_list[5][0].append(self.goal_position[0])
         self.state_list[5][1].append(self.goal_position[1])
         with open('pushing_state_list_' + str(self.get_namespace())[-1] + '.txt', 'w') as doc:
@@ -258,6 +272,38 @@ class PushingPattern(MovementPattern):
                 self.turn_timer.is_alive()) + ' goal= ' + str(self.search_goal_timer.is_alive()) + ' object= ' + str(
                 self.search_object_timer.is_alive()) + ' wall= ' + str(self.move_around_object_timer.is_alive())
             self.information_publisher.publish(self.info)
+
+    def model_states_callback(self, model_states):
+        index = 0
+        for name in model_states.name:
+            if name == 'robot_name_' + self.get_namespace()[-1]:
+                self.current_pose[0] = model_states.pose[index].position.x
+                self.current_pose[1] = model_states.pose[index].position.y
+
+                z = model_states.pose[index].orientation.z
+                w = model_states.pose[index].orientation.w
+
+                if np.sign(z) < 0:  # clockwise
+                    self.current_pose[2] = 2 * np.pi - 2 * np.arccos(w)
+                else:  # anticlockwise
+                    self.current_pose[2] = 2 * np.arccos(w)
+
+            elif name == self.object_name:
+                self.current_object_center[0] = model_states.pose[index].position.x
+                self.current_object_center[1] = model_states.pose[index].position.y
+
+                z = model_states.pose[index].orientation.z
+                w = model_states.pose[index].orientation.w
+
+                if np.sign(z) < 0:  # clockwise
+                    self.current_object_center[2] = 2 * np.pi - 2 * np.arccos(w)
+                else:  # anticlockwise
+                    self.current_object_center[2] = 2 * np.arccos(w)
+
+            elif name == self.goal_name:
+                self.goal_position[0] = model_states.pose[index].position.x
+                self.goal_position[1] = model_states.pose[index].position.y
+            index += 1
 
     def publish_info(self, msg):
         self.info.data = str(msg)
@@ -284,8 +330,11 @@ class PushingPattern(MovementPattern):
 
     # STATUS AKTUALISIERUNG UND AUSFÜHRUNG #
     def pushing(self):
-        if self.is_busy():
+        if self.max_transport_time_reached:
+            self.state = State.STOP
+        elif self.is_busy():
             return
+
         self.update_flags()
         self.update_state()
         self.publish_state()
@@ -293,6 +342,7 @@ class PushingPattern(MovementPattern):
 
     def update_flags(self):
         if self.state != State.INIT:
+            self.update_is_max_transport_time_reached()
             self.update_is_object_in_image()
             self.update_is_near_object()
 
@@ -365,6 +415,10 @@ class PushingPattern(MovementPattern):
             self.search_goal_timer.cancel()
             self.search_goal_timer = Timer(0, self.is_goal_occluded)
             self.search_goal_timer.start()
+            self.protection.data = 'False'
+
+        elif self.state == State.STOP:
+            self.direction = Twist()
             self.protection.data = 'False'
 
         self.protection_publisher.publish(self.protection)
@@ -484,7 +538,7 @@ class PushingPattern(MovementPattern):
 
     def is_goal_occluded(self):
         self.search_goal_timer.cancel()
-        self.search_goal_timer = Timer(self.param_target_timer_period, self.is_goal_occluded)
+        self.search_goal_timer = Timer(self.param_goal_timer_period, self.is_goal_occluded)
 
         if (not has_neighbors(self.current_scan)) and (not self.turn_timer.is_alive()) and (self.state == State.PUSH or self.state == State.CHECK_FOR_GOAL):
             occluded = True
@@ -556,6 +610,10 @@ class PushingPattern(MovementPattern):
             translational_velocity = translational_velocity * scale
             rotational_velocity = rotational_velocity * scale
         return translational_velocity, rotational_velocity
+
+    def update_is_max_transport_time_reached(self):
+        if self.transport_start_time is None:
+            self.transport_start_time = time.time()
 
 
 def main(args=None):

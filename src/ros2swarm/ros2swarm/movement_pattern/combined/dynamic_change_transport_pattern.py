@@ -357,11 +357,6 @@ class DynamicChangeTransportPattern(MovementPattern):
                                                           self.get_namespace() + '/drive_command_caging_pattern',
                                                           self.command_callback_caging, 10)
         # SUBSCRIBER #
-        self.model_states_subscription = self.create_subscription(ModelStates, '/gazebo/model_states',
-                                                                  self.model_states_callback,
-                                                                  qos_profile=qos_profile_sensor_data)
-        self.odom_subscription = self.create_subscription(Odometry, self.get_namespace() + '/odom', self.odom_callback,
-                                                          qos_profile=qos_profile_sensor_data)
         self.scan_subscription = self.create_subscription(
             LaserScan, self.get_namespace() + '/scan', self.swarm_command_controlled(self.scan_callback),
             qos_profile=qos_profile_sensor_data)
@@ -412,10 +407,13 @@ class DynamicChangeTransportPattern(MovementPattern):
         self.turn_timer = Timer(self.param_turn_timer_period, self.stop)
 
         # ZUM TESTEN UND AUSWERTEN #
+        self.model_states_subscription = self.create_subscription(ModelStates, '/gazebo/model_states',
+                                                                  self.model_states_callback,
+                                                                  qos_profile=qos_profile_sensor_data)
         # 0 = time, 1 = velocity, 2 = state, 3 = pose, 4 = object_center, 5 = goal_position]
-        self.state_list = [[], [[], []], [], [[], [], []], [[], []], [[], []]]
+        self.state_list = [[], [[], []], [], [[], [], []], [[], [], []], [[], []]]
         self.publish_state_counter = 0
-        self.current_object_center = [[], []]
+        self.current_object_center = [[], [], []]
         self.goal_position = [[], []]
         self.current_pose = [[], [], []]
 
@@ -430,6 +428,7 @@ class DynamicChangeTransportPattern(MovementPattern):
         self.state_list[3][2].append(np.rad2deg(self.current_pose[2]))
         self.state_list[4][0].append(self.current_object_center[0])
         self.state_list[4][1].append(self.current_object_center[1])
+        self.state_list[4][2].append(np.rad2deg(self.current_object_center[2]))
         self.state_list[5][0].append(self.goal_position[0])
         self.state_list[5][1].append(self.goal_position[1])
         with open('dynamic_change_state_list_' + str(self.get_namespace())[-1] + '.txt', 'w') as doc:
@@ -464,6 +463,14 @@ class DynamicChangeTransportPattern(MovementPattern):
             elif name == self.object_name:
                 self.current_object_center[0] = model_states.pose[index].position.x
                 self.current_object_center[1] = model_states.pose[index].position.y
+
+                z = model_states.pose[index].orientation.z
+                w = model_states.pose[index].orientation.w
+
+                if np.sign(z) < 0:  # clockwise
+                    self.current_object_center[2] = 2 * np.pi - 2 * np.arccos(w)
+                else:  # anticlockwise
+                    self.current_object_center[2] = 2 * np.arccos(w)
 
             elif name == self.goal_name:
                 self.goal_position[0] = model_states.pose[index].position.x
@@ -558,6 +565,9 @@ class DynamicChangeTransportPattern(MovementPattern):
                     self.state = State.STOP  # TODO: Entfernen nur zu testzwecken
 
             elif self.state == State.PUSHING or self.state == State.CAGING:
+                # TODO: müsste eigentlich gestartet werden wenn alles gestartet wird
+                #  und  nicht erst, wenn er sich für pushing oder caging entscheidet
+                #  und dem entsprechend auch gestoppt werden in egal welchem zustand
                 if self.max_transport_time_reached:
                     self.state = State.STOP
 
