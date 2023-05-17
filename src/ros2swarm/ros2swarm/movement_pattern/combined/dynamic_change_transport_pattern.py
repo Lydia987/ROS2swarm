@@ -357,6 +357,8 @@ class DynamicChangeTransportPattern(MovementPattern):
                                                           self.get_namespace() + '/drive_command_caging_pattern',
                                                           self.command_callback_caging, 10)
         # SUBSCRIBER #
+        self.odom_subscription = self.create_subscription(Odometry, self.get_namespace() + '/odom', self.odom_callback,
+                                                          qos_profile=qos_profile_sensor_data)
         self.scan_subscription = self.create_subscription(
             LaserScan, self.get_namespace() + '/scan', self.swarm_command_controlled(self.scan_callback),
             qos_profile=qos_profile_sensor_data)
@@ -559,10 +561,8 @@ class DynamicChangeTransportPattern(MovementPattern):
                     self.state = State.APPROACH
                 elif self.caging:
                     self.state = State.CAGING
-                    self.state = State.STOP  # TODO: Entfernen nur zu testzwecken
                 elif self.pushing:
                     self.state = State.PUSHING
-                    self.state = State.STOP  # TODO: Entfernen nur zu testzwecken
 
             elif self.state == State.PUSHING or self.state == State.CAGING:
                 # TODO: müsste eigentlich gestartet werden wenn alles gestartet wird
@@ -625,26 +625,30 @@ class DynamicChangeTransportPattern(MovementPattern):
         return approach
 
     def survey_object(self):
-        moveAroundObject = Twist()
-        # nur zu test zwecken
+        survey_object = Twist()
+        self.publish_info("In survey_object")
         if len(self.odometry_list) > 0:
+            self.publish_info("len(self.odometry_list) > 0:")
             if self.start_index_survey == np.inf:
                 self.start_index_survey = len(self.odometry_list) - 1
             elif self.start_index_survey == -1:
-                return moveAroundObject
+                self.publish_info("self.start_index_survey == -1:")
+                return survey_object
 
             position = self.odometry_list[-1][0]
             start_position = self.odometry_list[self.start_index_survey][0]
             distance_to_start = np.linalg.norm(np.subtract(position, start_position))
+            # evtl. überprüfen, ob schon zweimal in der Nähe der startposition war
 
-            if self.start_index_survey > 0 and len(self.odometry_list) > self.start_index_survey + 300 and (
-                    len(self.odometry_list) > self.start_index_survey + 1500 or distance_to_start < 0.01):
-                self.decide_transport_strategy(self.odometry_list[self.start_index_survey:-1])
+            if self.start_index_survey > -1 and len(self.odometry_list) > self.start_index_survey + 300 and (
+                    len(self.odometry_list) > self.start_index_survey + 1500):  # or distance_to_start < 0.01):
+                self.decide_transport_strategy(self.odometry_list[self.start_index_survey + 200:-1])
                 self.start_index_survey = -1
             else:
-                moveAroundObject = self.wall_follow()
+                self.publish_info("wall_follow()")
+                survey_object = self.wall_follow()
 
-        return moveAroundObject
+        return survey_object
 
     def wall_follow(self):
         """calculates the vector to follow the left wall"""

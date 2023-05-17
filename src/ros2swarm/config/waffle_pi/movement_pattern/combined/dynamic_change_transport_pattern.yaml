@@ -21,7 +21,7 @@
     # caging_pattern
     robot_length: 0.20925 # m
     robot_radius: 0.220 # m
-    object_name: 'Green' # Gazebomodelname  # Green | Green_Quader_3x2 | Green_Quader_4x4x2 | unit_cylinder_radius_1,5m | concave
+    object_name: 'Green_Quader_3x2' # Gazebomodelname  # Green | Green_Quader_3x2 | Green_Quader_4x4x2 | unit_cylinder_radius_1,5m | concave
     goal_name: 'Red' # Gazebomodelname
 
     # random_walk_pattern

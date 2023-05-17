@@ -797,6 +797,10 @@ class CagingPattern(MovementPattern):
             self.direction = self.transport()
             self.protection.data = 'False'
 
+        elif self.state == State.STOP:
+            self.direction = Twist()
+            self.protection.data = 'False'
+
         self.protection_publisher.publish(self.protection)
         self.command_publisher.publish(self.direction)
 
@@ -825,7 +829,6 @@ class CagingPattern(MovementPattern):
 
     def survey_object(self):
         survey_object = Twist()
-        # nur zu test zwecken
         if len(self.odometry_list) > 0:
             if self.start_index_survey == np.inf:
                 self.start_index_survey = len(self.odometry_list) - 1
@@ -835,10 +838,11 @@ class CagingPattern(MovementPattern):
             position = self.odometry_list[-1][0]
             start_position = self.odometry_list[self.start_index_survey][0]
             distance_to_start = np.linalg.norm(np.subtract(position, start_position))
+            # evtl. überprüfen, ob schon zweimal in der Nähe der startposition war
 
-            if self.start_index_survey > 0 and len(self.odometry_list) > self.start_index_survey + 300 and (
-                    len(self.odometry_list) > self.start_index_survey + 1500 or distance_to_start < 0.01):
-                self.update_shape_parameters(self.odometry_list[self.start_index_survey:-1])
+            if self.start_index_survey > -1 and len(self.odometry_list) > self.start_index_survey + 300 and (
+                    len(self.odometry_list) > self.start_index_survey + 1500):  # or distance_to_start < 0.01):
+                self.update_shape_parameters(self.odometry_list[self.start_index_survey + 200:-1])
                 self.start_index_survey = -1
             else:
                 survey_object = self.wall_follow()
