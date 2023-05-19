@@ -25,20 +25,4 @@ def generate_launch_description():
         on_exit=Shutdown()
     )
     ld.add_action(ros2_pattern_node)
-
-    # ros2_pattern_subnode_random_walk = launch_ros.actions.Node(
-    #     package='ros2swarm',
-    #     executable='random_walk_pattern',
-    #     namespace=robot_namespace,
-    #     output='screen',
-    #     remappings=[
-    #         (['/', robot_namespace, '/drive_command'],
-    #          ['/', robot_namespace, '/drive_command_random_walk_pattern'])
-    #     ],
-    #     parameters=[
-    #         PathJoinSubstitution([config_dir, 'movement_pattern', 'basic', 'pushing_pattern.yaml'])],
-    #     arguments=['--ros-args', '--log-level', log_level]
-    # )
-    # ld.add_action(ros2_pattern_subnode_random_walk)
-
     return ld

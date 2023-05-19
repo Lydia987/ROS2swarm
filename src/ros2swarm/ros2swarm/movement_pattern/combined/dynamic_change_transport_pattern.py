@@ -231,7 +231,7 @@ def get_image_contour(img, lower_color, upper_color):
 
     contours = cv.findContours(thresh.copy(), cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
     contours = imutils.grab_contours(contours)
-    # TODO: eventuell überprüfen ob mehr als eine contour gefunden wurde oder keine
+
     if len(contours) == 1:
         return contours[0]
     else:
@@ -367,8 +367,9 @@ class DynamicChangeTransportPattern(MovementPattern):
             qos_profile=qos_profile_sensor_data)
 
         # PUBLISHER #
-        self.information_publisher = self.create_publisher(
-            StringMessage, self.get_namespace() + '/information', 10)
+        self.information_publisher = self.create_publisher(StringMessage, self.get_namespace() + '/information', 10)
+        self.protection_publisher = self.create_publisher(StringMessage, self.get_namespace() + '/hardware_protection_layer', 10)
+
 
         self.direction = Twist()
         self.state = State.INIT
@@ -395,11 +396,15 @@ class DynamicChangeTransportPattern(MovementPattern):
         self.object_in_image = False
         self.object_direction = None
         self.object_height = 0.0
-        self.density = 1.0 # kg * m³ TODO: Zu param machen
+        self.density = 1.0  # kg * m³
 
         self.info = StringMessage()
         self.info.data = 'Starting Dynamic Change Transport Pattern'
         self.information_publisher.publish(self.info)
+
+        self.protection = StringMessage()
+        self.protection.data = 'True'
+        self.protection_publisher.publish(self.protection)
 
         # TIMER #
         # self.state_timer = Timer(0.01, self.dynamic_change)
@@ -412,8 +417,8 @@ class DynamicChangeTransportPattern(MovementPattern):
         self.model_states_subscription = self.create_subscription(ModelStates, '/gazebo/model_states',
                                                                   self.model_states_callback,
                                                                   qos_profile=qos_profile_sensor_data)
-        # 0 = time, 1 = velocity, 2 = state, 3 = pose, 4 = object_center, 5 = goal_position]
-        self.state_list = [[], [[], []], [], [[], [], []], [[], [], []], [[], []]]
+        # 0 = time, 1 = velocity, 2 = state, 3 = pose, 4 = object_center, 5 = goal_position, 6 = shape_parameter]
+        self.state_list = [[], [[], []], [], [[], [], []], [[], [], []], [[], []], []]
         self.publish_state_counter = 0
         self.current_object_center = [[], [], []]
         self.goal_position = [[], []]
@@ -580,26 +585,34 @@ class DynamicChangeTransportPattern(MovementPattern):
                 self.search_object_timer.start()
                 self.direction = self.random_walk_latest
                 self.state = State.SEARCH
+                self.protection.data = 'True'
 
         elif self.state == State.SEARCH:
             self.direction = self.random_walk_latest
+            self.protection.data = 'True'
 
         elif self.state == State.APPROACH:
             self.get_object_height()
             self.direction = self.approach()
+            self.protection.data = 'True'
 
         elif self.state == State.SURVEY_OBJECT:
             self.direction = self.survey_object()
+            self.protection.data = 'True'
 
         elif self.state == State.CAGING:
-            self.direction = self.caging_latest()
+            self.direction = self.caging_latest
+            self.protection.data = 'False'
 
         elif self.state == State.PUSHING:
-            self.direction = self.pushing_latest()
+            self.direction = self.pushing_latest
+            self.protection.data = 'False'
 
         elif self.state == State.STOP:
             self.direction = Twist()
+            self.protection.data = 'False'
 
+        self.protection_publisher.publish(self.protection)
         self.command_publisher.publish(self.direction)
 
     # BEWEGUNGSMUSTER #
@@ -748,7 +761,7 @@ class DynamicChangeTransportPattern(MovementPattern):
             return
 
         cv.drawContours(img, [contour], -1, (255, 0, 0), 2)
-        cv.imwrite('height.jpeg', img)  # TODO: wieder entfernen
+        cv.imwrite("/home/lydia/Bilder/height_dist" + str(dist) + "_robot" + str(self.get_namespace())[-1] + ".jpeg", img)  # TODO: wieder entfernen
 
         # get the height of the contour at the center of the picture
         min_y = img.shape[0]
@@ -848,13 +861,20 @@ class DynamicChangeTransportPattern(MovementPattern):
             caging = False
         if caging and pushing:
             pushing = False
+        if not pushing and not caging:
+            pushing = True
 
-        self.pushing = pushing
-        self.caging = caging
+        self.pushing = False  # pushing
+        self.caging = True  # caging
 
-        self.publish_info("Shape Parameter:")
-        self.publish_info("d_max=" + str(d_max) + " d_min=" + str(d_min) + " e=" + str(e))
-        self.publish_info("convex=" + str(convex) + " area=" + str(area) + " height=" + str(self.object_height))
+        # TODO: Wieder entfernen, nur zum auswerten
+        height = self.object_height
+        if height == np.inf:
+            height = 100.0
+        self.state_list[6].append([d_min, d_max, height, area, weight, e, r_cage, convex])
+
+        with open('dynamic_change_state_list_' + str(self.get_namespace())[-1] + '.txt', 'w') as doc:
+            doc.write(str(self.state_list))
 
     def scale_velocity(self, translational_velocity, rotational_velocity):
         if abs(translational_velocity) > self.param_max_translational_velocity:

@@ -16,13 +16,13 @@
     object_search_timer_period: 2.0 # s
 
     # search_object_pattern
-    wall_follow_timer_period: 15.0 # s
+    wall_follow_timer_period: 20.0 # s
 
     # caging_pattern
     robot_length: 0.20925 # m
     robot_radius: 0.220 # m
-    object_name: 'Green_Quader_3x2' # Gazebomodelname  # Green | Green_Quader_3x2 | Green_Quader_4x4x2 | unit_cylinder_radius_1,5m | concave
-    goal_name: 'Red' # Gazebomodelname
+    object_name: 'Circle_d3_h0,5' # Gazebomodelname  # Circle_d3_h0,5 | Green | Green_Quader_3x2 | Green_Quader_4x4x2 | unit_cylinder_radius_1,5m | concave
+    goal_name: 'Goal' # Red | Goal Gazebomodelname
 
     # random_walk_pattern
     random_walk_timer_period: 0.25

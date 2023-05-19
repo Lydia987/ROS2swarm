@@ -22,23 +22,6 @@ from cv_bridge import CvBridge
 bridge = CvBridge()
 
 
-# TODO: Schwerpunkt von concave noch richtig setzten
-# TODO: bei transport trotzdem noch hardware_protection, aber nur wenn auf der rechten seite des Roboters ein Hindernis ist
-# TODO: Fehleranfälligkeit bei zu vielen Robotern reduzieren durch raushalten eines Roboters aus dem Transport,
-#        wenn schon mehr als 2 Roboter als benötigt im quorum sind
-# TODO: abschätzung der höhe, aber nur bei combined machen: möglich bei approach mehrere messungen von dist und daraus abschätzung der höhe im kamerabild
-# TODO: Positionen noch anpassen (Parameter l beachten!!!)
-# TODO: Vektorfeld noch anpassen, sollte bei großem K beim Kreis äußeren direkt richtung kreis zeigen und beim kreis inneren direkt nach draußen!
-#       * eine Version davon ist schon vorhanden,
-#           allerdings bleiben die roboter nahe zu stehen wenn sie in richtung des Kreises kommen
-#           und dies wird nicht durch psi behoben
-#       * offensichtlich wird psi irgendwie noch falsch berechnet
-# TODO: Eventuell extra Nachrichten typ für quorum_msg anlegen
-# IDEE: da die roboter das Objekt immer umkreisen sollten sie nach jeden umkreisen das ziel mindestens einmal gesehen haben
-#       roboter merkt sich relative position zum ziel durch Odometrie bis er es wieder gesehen hat
-#       Gewichtung der shape control um so stärker, je länger er das ziel nicht sieht
-
-
 def get_shape_points(odometry_list):
     # Punkte der Shape aus Laserdaten und Roboterposition berechnen
     x = []
@@ -346,25 +329,6 @@ def s(x, y, r, center):
     return shape
 
 
-def get_trajectory(start, goal, distance):
-    # Calculate the vector from start to goal
-    vector = np.array(goal) - np.array(start)
-
-    # Calculate the length of the vector
-    length = np.linalg.norm(vector)
-
-    # Calculate the unit vector in the direction of the vector
-    unit_vector = vector / length
-
-    # Calculate the scaled vector with length equal to `distance`
-    scaled_vector = distance * unit_vector
-
-    # Calculate the final point by adding the scaled vector to the start point
-    point = np.array(start) + scaled_vector
-
-    return tuple(point)
-
-
 def get_mean_dist(scan_msg, min_angle, max_angle):
     """ calculates the mean distance to obstacles between the min_angle and max_angle """
     R = scan_msg.range_max  # repulsive force up to R in meter
@@ -471,6 +435,8 @@ class CagingPattern(MovementPattern):
         self.state = State.INIT
         self.max_transport_time_reached = False
         self.transport_start_time = None
+        self.trajectory = None
+        self.last_call_time_get_trajectory = None
         self.current_scan = None
         self.current_image = None
         self.last_error = 0.0
@@ -751,14 +717,14 @@ class CagingPattern(MovementPattern):
                 if not (self.closure and self.quorum):
                     self.state = State.SURROUND
 
-        if old_state == State.SURROUND and self.state != State.APPROACH and self.surround_switch_counter < 15:
+        if old_state == State.SURROUND and self.state != State.APPROACH and self.surround_switch_counter < 20:
             # self.publish_info("state_switch_counter")
             self.surround_switch_counter += 1
             self.state = old_state
         else:
             self.surround_switch_counter = 0
 
-        if old_state == State.TRANSPORT and self.state != State.TRANSPORT and self.transport_switch_counter < 40:
+        if old_state == State.TRANSPORT and self.state != State.TRANSPORT and self.transport_switch_counter < 80: # lief mit 60 ok
             # self.publish_info("state_switch_counter")
             self.transport_switch_counter += 1
             self.state = old_state
@@ -807,14 +773,14 @@ class CagingPattern(MovementPattern):
     # BEWEGUNGSMUSTER #
     def approach(self):
         self.update_Q()
-        v, w = self.shape_control(0.5)
+        v, w = self.shape_control(0.3)
         approach = Twist()
         approach.linear.x = v
         approach.angular.z = w
         return approach
 
     def surround(self):
-        v, w = self.shape_control(0.0)
+        v, w = self.shape_control(0.1)
         surround = Twist()
         surround.linear.x = v
         surround.angular.z = w
@@ -840,9 +806,9 @@ class CagingPattern(MovementPattern):
             distance_to_start = np.linalg.norm(np.subtract(position, start_position))
             # evtl. überprüfen, ob schon zweimal in der Nähe der startposition war
 
-            if self.start_index_survey > -1 and len(self.odometry_list) > self.start_index_survey + 300 and (
+            if self.start_index_survey > -1 and len(self.odometry_list) > self.start_index_survey + 500 and (
                     len(self.odometry_list) > self.start_index_survey + 1500):  # or distance_to_start < 0.01):
-                self.update_shape_parameters(self.odometry_list[self.start_index_survey + 200:-1])
+                self.update_shape_parameters(self.odometry_list[self.start_index_survey + 300:-1])
                 self.start_index_survey = -1
             else:
                 survey_object = self.wall_follow()
@@ -868,10 +834,10 @@ class CagingPattern(MovementPattern):
         robots, robots_center = get_neighbors(self.current_scan, 1.6)
         min_dist = np.inf
         for robot in robots_center:
-            if np.deg2rad(350) < robot[1] < np.deg2rad(10) and robot[0] < min_dist:
+            if np.deg2rad(340) < robot[1] < np.deg2rad(20) and robot[0] < min_dist:
                 min_dist = robot[0]
             if min_dist <= 1.6:
-                linear = linear * min_dist * 0.53
+                linear = linear * min_dist * 0.5  # 0.53
 
         linear, angular = self.scale_velocity(linear, angular)
         wall_follow_direction = Twist()
@@ -961,7 +927,7 @@ class CagingPattern(MovementPattern):
             self.command_publisher.publish(backwards)
             # self.publish_info('backwards START')
 
-            # TODO: param daraus machen der in der Yaml datei steht oder besser in abhängigkeit der max geschwindigkeit
+            # TODO: param in abhängigkeit der max geschwindigkeit statt 1.0
             time.sleep(1.0)
 
     def turn_once(self):
@@ -980,20 +946,16 @@ class CagingPattern(MovementPattern):
             return False
 
     def update_is_quorum(self, scan_msg):
-        # TODO: mit paper überprüfen ob richtig implementiert
         # TODO: max_range sollte laut dem Paper D_min(obj) entsprechen
-        max_range = self.d_min + self.r + 1.0  # eigentlich self.d_min + self.r vermutlich läuft es aber mit einer etwas größeren range besser
+        max_range = self.d_min + self.r + 0.5  # vermutlich läuft es aber mit einer etwas größeren range besser
         robots, robots_center = get_neighbors(scan_msg, max_range)
         front = 0
         back = 0
         for robot in robots_center:
-            if robot[1] < np.deg2rad(
-                    80):  # robot[1] > np.deg2rad(280): value clockwise, robot[1] < np.deg2rad(80): value anticlockwise
+            if robot[1] < np.deg2rad(80):
                 front += 1
-            elif np.deg2rad(180) > robot[1] > np.deg2rad(
-                    100):  # np.deg2rad(260) > robot[1] > np.deg2rad(180): value clockwise, np.deg2rad(180) > robot[1] > np.deg2rad(100): value anticlockwise
+            elif np.deg2rad(180) > robot[1] > np.deg2rad(100):
                 back += 1
-        # self.publish_info('#:' + str(len(robots)) + ' front:' + str(front) + ' back:' + str(back))
         if front > 0 and back > 0:
             self.quorum = True
         else:
@@ -1001,12 +963,9 @@ class CagingPattern(MovementPattern):
 
     def update_is_closure(self):
         """ sets closure to true, if the robots get_surround_direction the object """
-        # TODO: mit paper überprüfen ob richtig implementiert
         robots_in_quorum = sum(value == 'True' for value in self.quorum_dict.values())
         min_robots_for_closure = (2 * np.pi * self.get_r_cage()) / (2 * self.r + self.d_min)
-        # self.publish_info(
-        #     '#quorum=' + str(robots_in_quorum) + '  #min=' + str(min_robots_for_closure) + ' r_cage=' + str(
-        #         self.get_r_cage()))
+
         if robots_in_quorum < min_robots_for_closure:
             self.closure = False
         else:
@@ -1036,7 +995,7 @@ class CagingPattern(MovementPattern):
                         dist_valid = False
             else:
                 dist = get_distance(self.current_scan, 90)
-                if dist > self.get_r_cage() - 0.3:  # self.get_r_cage() - 0.5 * self.d_min:
+                if dist > self.get_r_cage() - 0.5:  # self.get_r_cage() - 0.5 * self.d_min:
                     self.near_object = False
                 for robot in robots_center:
                     if np.deg2rad(85) < robot[1] < np.deg2rad(95):
@@ -1059,7 +1018,7 @@ class CagingPattern(MovementPattern):
 
         elif self.state == State.SURROUND:
             dist = get_distance(self.current_scan, 90)
-            if dist > self.get_r_cage():
+            if dist > self.get_r_cage() + 0.1: # davor ohne 0.1, lief eigentlich ganz gut, bis auf das roboter Teilweise ins Schwingen gekommen sind
                 self.near_object = False
 
             for robot in robots_center:
@@ -1075,12 +1034,6 @@ class CagingPattern(MovementPattern):
         approx, self.d_min = get_approx_dmin(img, str(self.get_namespace())[-1])  # TODO: robotname wieder entfernen
         self.d_max = get_dmax(approx2contour(approx), str(self.get_namespace())[-1])  # TODO: robotname wieder entfernen
         self.e = self.d_max * 0.076
-        convex = cv.isContourConvex(approx)  # TODO: Hier wieder entfernen nur bei kombinierten von Nöten
-        area = cv.contourArea(approx)  # TODO: Hier wieder entfernen nur bei kombinierten von Nöten
-
-        # self.publish_info("Shape Parameter:")
-        # self.publish_info("d_max=" + str(self.d_max) + " d_min=" + str(self.d_min) + " e=" + str(self.e))
-        # self.publish_info("convex=" + str(convex) + " area=" + str(area))
 
     def update_goal_position(self):
         x_list = []
@@ -1242,8 +1195,7 @@ class CagingPattern(MovementPattern):
 
     def gamma(self, q):
         if self.state == State.TRANSPORT:
-            # TODO: eventuell 0.75 noch erhöhen oder verringern
-            center = get_trajectory(self.current_object_center[:2], self.goal_position, self.d_min * 0.75)
+            center = self.get_trajectory()
         else:
             center = self.current_object_center[:2]
 
@@ -1318,6 +1270,26 @@ class CagingPattern(MovementPattern):
     def update_is_max_transport_time_reached(self):
         if self.transport_start_time is None:
             self.transport_start_time = time.time()
+
+    def get_trajectory(self):
+        if self.trajectory is None or time.time() - self.last_call_time_get_trajectory > 10.0 or time.time() - \
+                self.trajectory[0] > 30.0:
+            if self.trajectory is not None:
+                self.publish_info("time.time() - self.trajectory[0] = " + str(time.time() - self.trajectory[0]))
+            start = self.current_object_center[:2]
+            goal = self.goal_position
+            start_time = time.time()
+            vector = np.array(goal) - np.array(start)
+            length = np.linalg.norm(vector)
+            unit_vector = vector / length
+            self.trajectory = [start_time, start, unit_vector]
+        # eventuell mit faktor 30 nochmal rum experimentieren, bzw. dann annahme das schon etwas zeitvergangen war, also dass die starttime in der Vergangen heit liegt
+        passed_time = time.time() - self.trajectory[0]
+        scaled_vector = passed_time * self.trajectory[2] * 0.035
+        point = np.array(self.trajectory[1]) + scaled_vector
+
+        self.last_call_time_get_trajectory = time.time()
+        return tuple(point)
 
 
 def main(args=None):

@@ -1,8 +1,8 @@
 /**:
   ros__parameters:
     # caging_pattern
-    object_name: 'Green' # Gazebomodelname  # Green | Green_Quader_3x2 | Green_Quader_4x4x2 | unit_cylinder_radius_1,5m | concave
-    goal_name: 'Red' # Gazebomodelname
+    object_name: 'Green' # Gazebomodelname  # Circle_d3_h0,5 | Green | Green_Quader_3x2 | Green_Quader_4x4x2 | unit_cylinder_radius_1,5m | concave
+    goal_name: 'Goal' # Gazebomodelname
     robot_length: 0.20925 # m
     robot_radius: 0.220 # m
     turn_timer_period: 3.46 #s

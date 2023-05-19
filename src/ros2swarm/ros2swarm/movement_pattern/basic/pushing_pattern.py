@@ -8,29 +8,15 @@ from ros2swarm.utils import setup_node
 from ros2swarm.utils.state import State
 from ros2swarm.movement_pattern.movement_pattern import MovementPattern
 from ros2swarm.utils.scan_calculation_functions import ScanCalculationFunctions
-
+from cv_bridge import CvBridge
+from threading import Timer
+import random
 import numpy as np
 import time
-from threading import Timer
-
 import imutils
 import cv2 as cv
-from cv_bridge import CvBridge
-
 bridge = CvBridge()
 
-import random
-
-
-# https://cvexplained.wordpress.com/2020/04/28/color-detection-hsv/
-
-# TODO: eventuell Random walk bewusst nicht implementieren wegen effizienz
-# TODO: Verhalten zu den Combined verhalten einordnen
-# TODO: Eventuell anstatt is_busy() State Check hinzufügen
-# TODO: Move Around Object timer eventuell random in einem Bestimmten bereich setzten
-# TODO: Move Around Object right or left wall, abhängig davon machen wann das Ziel gesehen wurde
-# TODO: Standard mäßige überprüfung ob Roboter vor einem bei Pushing, dann Protection an, vermutlich zu rechen intensiv
-#       * stattdessen lieber implementieren wenn rechts von ihm mehr ist als links, dass er sich leicht in diese richtung dreht
 def get_neighbors(scan_msg, max_range):
     # TODO: Params für den threshold und width abhängig von roboter typ anlegen
     # center: erster wert entfernung in meter , zweiter wert rad (vorne 0, links rum steigend bis 2pi)
@@ -50,7 +36,7 @@ def get_image_contour(img, lower_color, upper_color):
 
     contours = cv.findContours(thresh.copy(), cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
     contours = imutils.grab_contours(contours)
-    # TODO: eventuell überprüfen ob mehr als eine contour gefunden wurde oder keine
+
     if len(contours) == 1:
         return contours[0]
     else:
@@ -111,7 +97,8 @@ def get_distance(scan_msg, degree):
 def has_neighbors(scan_msg):
     # center: erster wert entfernung in meter, zweiter wert rad (vorne 0, links rum steigend bis 2pi)
     # roboter werden zwischen 0,2 m und 3 m erkannt min_range=0, max_range=3, threshold=0.35, min_width=0, max_width=15
-    robots, robots_center = ScanCalculationFunctions.identify_robots(laser_scan=scan_msg, min_range=0, max_range=3, threshold=0.35, min_width=0, max_width=15)
+    robots, robots_center = ScanCalculationFunctions.identify_robots(laser_scan=scan_msg, min_range=0, max_range=3,
+                                                                     threshold=0.35, min_width=0, max_width=15)
     left = 0
     right = 0
 
@@ -178,19 +165,18 @@ class PushingPattern(MovementPattern):
             "wall_follow_timer_period").get_parameter_value().double_value
         self.max_transport_time = self.get_parameter("max_transport_time").get_parameter_value().double_value
 
-
-        # SUBPATTERN #
-        self.random_walk_latest = Twist()
-        self.random_walk_subpattern = self.create_subscription(
-            Twist, self.get_namespace() + '/drive_command_random_walk_pattern', self.command_callback_random_walk, 10)
-
         # SUBSCRIBER #
-        self.scan_subscription = self.create_subscription(LaserScan, self.get_namespace() + '/scan', self.swarm_command_controlled(self.scan_callback), qos_profile=qos_profile_sensor_data)
-        self.camera_subscription = self.create_subscription(Image, self.get_namespace() + '/camera/image_raw', self.swarm_command_controlled(self.camera_callback), qos_profile=qos_profile_sensor_data)
+        self.scan_subscription = self.create_subscription(LaserScan, self.get_namespace() + '/scan',
+                                                          self.swarm_command_controlled(self.scan_callback),
+                                                          qos_profile=qos_profile_sensor_data)
+        self.camera_subscription = self.create_subscription(Image, self.get_namespace() + '/camera/image_raw',
+                                                            self.swarm_command_controlled(self.camera_callback),
+                                                            qos_profile=qos_profile_sensor_data)
 
         # PUBLISHER #
         self.information_publisher = self.create_publisher(StringMessage, self.get_namespace() + '/information', 10)
-        self.protection_publisher = self.create_publisher(StringMessage, self.get_namespace() + '/hardware_protection_layer', 10)
+        self.protection_publisher = self.create_publisher(StringMessage,
+                                                          self.get_namespace() + '/hardware_protection_layer', 10)
 
         # GENERAL #
         self.state = State.INIT
@@ -199,21 +185,17 @@ class PushingPattern(MovementPattern):
         self.direction = Twist()
         self.max_transport_time_reached = False
         self.transport_start_time = None
-
-        # color in RGB = [76, 142, 24] , in BGR = [24, 142, 76] and in HSV = [47 212 142]
-        # [100, 50, 50] bis [140, 255, 255] entspricht rot, aber warum ???
-        # [50, 100, 100] bis [70, 255, 255] entspricht grün
-        # print(cv.cvtColor(np.uint8([[BGR]]),cv.COLOR_BGR2HSV))
+        self.random_walk_latest = Twist()
 
         # OBJEKT #
-        self.lower_object_color = np.array([50, 50, 50])  # np.array([50, 50, 50])  # in HSV [H-10, 100,100]
-        self.upper_object_color = np.array([70, 255, 255])  # np.array([70, 255, 255])  # in HSV [H+10, 255, 255]
+        self.lower_object_color = np.array([50, 50, 50])
+        self.upper_object_color = np.array([70, 255, 255])
         self.object_in_image = False
         self.near_object = False
 
         # GOAL #
-        self.lower_goal_color = np.array([110, 100, 100])  # np.array([0, 50, 50])  # in HSV [H-10, 100,100]
-        self.upper_goal_color = np.array([130, 255, 255])  # np.array([10, 255, 255])  # in HSV [H+10, 255, 255]
+        self.lower_goal_color = np.array([110, 100, 100])
+        self.upper_goal_color = np.array([130, 255, 255])
         self.goal_in_image = False
         self.goal_is_occluded = False
 
@@ -265,7 +247,8 @@ class PushingPattern(MovementPattern):
         self.publish_state_counter -= 1
         if self.publish_state_counter <= 0:
             self.publish_state_counter = 10
-            self.info.data = '_____' + str(self.state) + '_____ target=' + str(self.goal_is_occluded) + ' object=' + str(self.object_in_image)
+            self.info.data = '_____' + str(self.state) + '_____ target=' + str(
+                self.goal_is_occluded) + ' object=' + str(self.object_in_image)
             self.information_publisher.publish(self.info)
 
             self.info.data = 'BUSY= ' + str(self.is_busy()) + ' turn= ' + str(
@@ -310,17 +293,12 @@ class PushingPattern(MovementPattern):
         self.information_publisher.publish(self.info)
 
     # CALLBACKS #
-    def command_callback_random_walk(self, incoming_msg: Twist):
-        """Assign the message to variable"""
-        self.random_walk_latest = incoming_msg
-
     def scan_callback(self, incoming_msg: LaserScan):
         """Call back if a new scan msg is available."""
         self.current_scan = incoming_msg
-
-        # TODO: wieder entfernen, wenn random_walk in launch file wieder einkommentiert ist
         self.random_walk_latest.linear.x = self.param_max_translational_velocity
-        self.random_walk_latest.angular.z = random.randint(-1, 2) * random.randint(1, 11) * 0.1 * self.param_max_rotational_velocity
+        self.random_walk_latest.angular.z = random.randint(-1, 2) * random.randint(1,
+                                                                                   11) * 0.1 * self.param_max_rotational_velocity
 
         self.pushing()
 
@@ -540,7 +518,8 @@ class PushingPattern(MovementPattern):
         self.search_goal_timer.cancel()
         self.search_goal_timer = Timer(self.param_goal_timer_period, self.is_goal_occluded)
 
-        if (not has_neighbors(self.current_scan)) and (not self.turn_timer.is_alive()) and (self.state == State.PUSH or self.state == State.CHECK_FOR_GOAL):
+        if (not has_neighbors(self.current_scan)) and (not self.turn_timer.is_alive()) and (
+                self.state == State.PUSH or self.state == State.CHECK_FOR_GOAL):
             occluded = True
             self.publish_info('!!!Starte Überprüfung auf ZIEL!!')
             self.drive_backwards()

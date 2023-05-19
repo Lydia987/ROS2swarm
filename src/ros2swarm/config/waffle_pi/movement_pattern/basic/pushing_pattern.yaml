@@ -1,7 +1,7 @@
 /**:
   ros__parameters:
     # search_object_pattern
-    wall_follow_timer_period: 14.0 # s
+    wall_follow_timer_period: 20.0 # s
     max_transport_time: 1200.0 # s
     turn_timer_period: 3.46 # s
     goal_search_timer_period: 10.0 # s
@@ -10,14 +10,6 @@
     # Common
     max_translational_velocity: 0.5 # 0.26 # m/s
     max_rotational_velocity: 1.82 # rad/s
-
-    # random_walk_pattern
-    random_walk_timer_period: 0.25
-    random_walk_linear: 0.26
-    random_walk_angular: 1.82
-    random_walk_rot_interval: 3.5
-    random_walk_lin_interval_min: 10.0
-    random_walk_lin_interval_max: 15.0
 
     # nur zur Auswertung
     object_name: 'Green' # Gazebomodelname  # Green | Green_Quader_3x2 | Green_Quader_4x4x2 | unit_cylinder_radius_1,5m | concave
