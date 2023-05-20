@@ -947,7 +947,7 @@ class CagingPattern(MovementPattern):
 
     def update_is_quorum(self, scan_msg):
         # TODO: max_range sollte laut dem Paper D_min(obj) entsprechen
-        max_range = self.d_min + self.r + 0.5  # vermutlich läuft es aber mit einer etwas größeren range besser
+        max_range = self.d_min + self.r + 0.5 # vermutlich läuft es aber mit einer etwas größeren range besser
         robots, robots_center = get_neighbors(scan_msg, max_range)
         front = 0
         back = 0
@@ -1272,19 +1272,22 @@ class CagingPattern(MovementPattern):
             self.transport_start_time = time.time()
 
     def get_trajectory(self):
-        if self.trajectory is None or time.time() - self.last_call_time_get_trajectory > 10.0 or time.time() - \
-                self.trajectory[0] > 30.0:
-            if self.trajectory is not None:
-                self.publish_info("time.time() - self.trajectory[0] = " + str(time.time() - self.trajectory[0]))
+        initialize = self.trajectory is None or time.time() - self.last_call_time_get_trajectory > 10.0
+        refresh = not initialize and time.time() - self.trajectory[0] > 30.0
+
+        if initialize or refresh:
+            start_time = time.time()
             start = self.current_object_center[:2]
             goal = self.goal_position
-            start_time = time.time()
             vector = np.array(goal) - np.array(start)
             length = np.linalg.norm(vector)
             unit_vector = vector / length
             self.trajectory = [start_time, start, unit_vector]
-        # eventuell mit faktor 30 nochmal rum experimentieren, bzw. dann annahme das schon etwas zeitvergangen war, also dass die starttime in der Vergangen heit liegt
+
         passed_time = time.time() - self.trajectory[0]
+        if refresh:
+            self.publish_info("refresh")
+            passed_time -= 20.0
         scaled_vector = passed_time * self.trajectory[2] * 0.035
         point = np.array(self.trajectory[1]) + scaled_vector
 
