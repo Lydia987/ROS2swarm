@@ -15,7 +15,9 @@ import numpy as np
 import time
 import imutils
 import cv2 as cv
+
 bridge = CvBridge()
+
 
 def get_neighbors(scan_msg, max_range):
     # TODO: Params für den threshold und width abhängig von roboter typ anlegen
@@ -97,21 +99,18 @@ def get_distance(scan_msg, degree):
 def has_neighbors(scan_msg):
     # center: erster wert entfernung in meter, zweiter wert rad (vorne 0, links rum steigend bis 2pi)
     # roboter werden zwischen 0,2 m und 3 m erkannt min_range=0, max_range=3, threshold=0.35, min_width=0, max_width=15
-    robots, robots_center = ScanCalculationFunctions.identify_robots(laser_scan=scan_msg, min_range=0, max_range=3,
+    robots, robots_center = ScanCalculationFunctions.identify_robots(laser_scan=scan_msg, min_range=0, max_range=1.5,
                                                                      threshold=0.35, min_width=0, max_width=15)
     left = 0
     right = 0
 
     for robot in robots_center:
-        if np.deg2rad(160) > robot[1] > np.deg2rad(5):
+        if np.deg2rad(100) > robot[1] > np.deg2rad(5):
             left += 1
-        elif np.deg2rad(355) > robot[1] > np.deg2rad(200):
+        elif np.deg2rad(355) > robot[1] > np.deg2rad(260):
             right += 1
 
-    if left > 0 and right > 0:
-        return True
-    else:
-        return False
+    return left, right
 
 
 def is_color_in_image(image, lower_color, upper_color):
@@ -192,11 +191,12 @@ class PushingPattern(MovementPattern):
         self.upper_object_color = np.array([70, 255, 255])
         self.object_in_image = False
         self.near_object = False
+        self.object_in_center = False
 
         # GOAL #
         self.lower_goal_color = np.array([110, 100, 100])
         self.upper_goal_color = np.array([130, 255, 255])
-        self.goal_in_image = False
+        self.goal_in_image = True
         self.goal_is_occluded = False
 
         self.info = StringMessage()
@@ -209,10 +209,10 @@ class PushingPattern(MovementPattern):
 
         # TIMER #
         self.search_goal_timer = Timer(self.param_goal_timer_period, self.is_goal_occluded)
+        self.last_goal_check = time.time() - 7.0
         self.search_object_timer = Timer(self.param_object_timer_period, self.is_object_visible)
         self.turn_timer = Timer(self.param_turn_timer_period, self.stop)
-        self.move_around_object_timer = Timer(self.param_move_around_object_timer_period, self.stop)
-
+        self.move_around_object_start_time = None
         # COUNTER #
         self.state_switch_counter = 0
 
@@ -247,13 +247,8 @@ class PushingPattern(MovementPattern):
         self.publish_state_counter -= 1
         if self.publish_state_counter <= 0:
             self.publish_state_counter = 10
-            self.info.data = '_____' + str(self.state) + '_____ target=' + str(
-                self.goal_is_occluded) + ' object=' + str(self.object_in_image)
-            self.information_publisher.publish(self.info)
-
-            self.info.data = 'BUSY= ' + str(self.is_busy()) + ' turn= ' + str(
-                self.turn_timer.is_alive()) + ' goal= ' + str(self.search_goal_timer.is_alive()) + ' object= ' + str(
-                self.search_object_timer.is_alive()) + ' wall= ' + str(self.move_around_object_timer.is_alive())
+            self.info.data = '__' + str(self.state) + '__ goal_is_occluded=' + str(
+                self.goal_is_occluded) + ' object_in_image=' + str(self.object_in_image)
             self.information_publisher.publish(self.info)
 
     def model_states_callback(self, model_states):
@@ -308,6 +303,8 @@ class PushingPattern(MovementPattern):
 
     # STATUS AKTUALISIERUNG UND AUSFÜHRUNG #
     def pushing(self):
+        self.publish_state()
+
         if self.max_transport_time_reached:
             self.state = State.STOP
         elif self.is_busy():
@@ -315,49 +312,53 @@ class PushingPattern(MovementPattern):
 
         self.update_flags()
         self.update_state()
-        self.publish_state()
         self.execute_state()
 
     def update_flags(self):
         if self.state != State.INIT:
             self.update_is_max_transport_time_reached()
             self.update_is_object_in_image()
-            self.update_is_near_object()
 
-            if self.state == State.PUSH:
-                self.update_is_goal_in_image()
+            if self.state != State.SEARCH or self.state != State.MOVE_AROUND_OBJECT:
+                self.update_is_near_object()
 
     def update_state(self):
         old_state = self.state
 
         if self.state != State.INIT:
-            if self.state == State.MOVE_AROUND_OBJECT:
-                if self.move_around_object_timer.is_alive():
-                    self.state = State.MOVE_AROUND_OBJECT
-                else:
+            if self.state == State.SEARCH:
+                if self.object_in_image:
+                    self.state = State.APPROACH
+
+            elif self.state == State.APPROACH:
+                if not self.object_in_image:
                     self.state = State.SEARCH
-
-            elif not self.object_in_image:
-                self.state = State.SEARCH
-
-            elif self.state == State.SEARCH and self.object_in_image:
-                self.state = State.APPROACH
-
-            elif self.state == State.APPROACH and self.near_object:
-                self.state = State.CHECK_FOR_GOAL
-
-            elif self.state == State.PUSH and self.goal_in_image:
-                self.state = State.MOVE_AROUND_OBJECT
+                elif self.near_object and self.object_in_center:
+                    self.state = State.CHECK_FOR_GOAL
 
             elif self.state == State.CHECK_FOR_GOAL:
+                # if not self.object_in_image:
+                #     self.state = State.SEARCH
                 if self.goal_is_occluded:
                     self.state = State.PUSH
                 else:
                     self.state = State.MOVE_AROUND_OBJECT
-                    self.move_around_object_timer = Timer(self.param_move_around_object_timer_period, self.stop)
-                    self.move_around_object_timer.start()
+                    self.move_around_object_start_time = time.time()
 
-        if self.state == State.SEARCH and old_state != State.SEARCH and old_state != State.MOVE_AROUND_OBJECT and self.state_switch_counter < 20:
+            elif self.state == State.MOVE_AROUND_OBJECT:
+                if time.time() - self.move_around_object_start_time >= self.param_move_around_object_timer_period:
+                    self.state = State.SEARCH
+
+            elif self.state == State.PUSH:
+                # if not self.object_in_image:
+                #     self.state = State.SEARCH
+                if get_mean_dist(self.current_scan, -5, 5) > 1.5:
+                    self.state = State.SEARCH
+                elif not self.goal_is_occluded:
+                    self.state = State.MOVE_AROUND_OBJECT
+                    self.move_around_object_start_time = time.time()
+
+        if self.state == State.SEARCH and old_state == State.APPROACH and self.state_switch_counter < 15:
             self.state = old_state
             self.state_switch_counter += 1
         else:
@@ -368,13 +369,13 @@ class PushingPattern(MovementPattern):
         if self.state == State.INIT:
             fully_initialized = not (self.current_image is None or self.current_scan is None)
             if fully_initialized:
-                self.search_goal_timer.start()
                 self.search_object_timer.start()
+                self.search_goal_timer.start()
                 self.direction = self.random_walk_latest
                 self.state = State.SEARCH
 
         elif self.state == State.SEARCH:
-            self.direction = self.random_walk_latest
+            self.direction = self.avoid(self.random_walk_latest)
             self.protection.data = 'True'
 
         elif self.state == State.APPROACH:
@@ -391,9 +392,11 @@ class PushingPattern(MovementPattern):
 
         elif self.state == State.CHECK_FOR_GOAL:
             self.search_goal_timer.cancel()
-            self.search_goal_timer = Timer(0, self.is_goal_occluded)
+            self.search_goal_timer = Timer(0.0, self.is_goal_occluded)
             self.search_goal_timer.start()
-            self.protection.data = 'False'
+            return
+            # self.direction = Twist()
+            # self.protection.data = 'False'
 
         elif self.state == State.STOP:
             self.direction = Twist()
@@ -401,16 +404,20 @@ class PushingPattern(MovementPattern):
 
         self.protection_publisher.publish(self.protection)
         self.command_publisher.publish(self.direction)
+        self.publish_info("published command: " + str(self.state))
 
     # BEWEGUNGSMUSTER #
     def approach(self):
         img = self.current_image
         img_width = img.shape[1]
         contour = get_image_contour(img, self.lower_object_color, self.upper_object_color)
+        self.object_in_center = False
         if contour is not None:
             x, y = get_center(contour)
             # normiert Wert: 1 (ganz links) und -1 (ganz rechts)
             turn_intensity_and_direction = (2 * x / img_width - 1) * -1
+            if abs(turn_intensity_and_direction) < 0.05:
+                self.object_in_center = True
             # draw the contour and center of the shape on the image TODO: wieder entfernen
             cv.drawContours(img, [contour], -1, (255, 0, 0), 2)
             cv.circle(img, (x, y), 7, (255, 0, 0), -1)
@@ -418,16 +425,27 @@ class PushingPattern(MovementPattern):
         else:
             turn_intensity_and_direction = 0.0
 
+        linear = self.param_max_translational_velocity * 0.8
+        angular = turn_intensity_and_direction * self.param_max_rotational_velocity
+
         approach = Twist()
-        approach.angular.z = turn_intensity_and_direction * self.param_max_rotational_velocity
-        approach.linear.x = self.param_max_translational_velocity
+        approach.angular.z = angular
+        approach.linear.x = linear
+        approach = self.avoid(approach)
 
         return approach
 
     def push(self):
         push = Twist()
-        push.angular.z = 0.0  # eventuell abhängig davon, ob links oder rechts eine geringer distanz ist drehen
-        push.linear.x = 0.3 * self.param_max_translational_velocity
+        robots, robots_center = get_neighbors(self.current_scan, 1.6)
+        for robot in robots_center:
+            if np.deg2rad(350) < robot[1] < np.deg2rad(10):
+                self.publish_info("roboter vor mir! ich bleibe stehen")
+                return push
+        if get_mean_dist(self.current_scan, -15, 15) > 1.0:
+            push.linear.x = self.param_max_translational_velocity
+        else:
+            push.linear.x = 0.3 * self.param_max_translational_velocity
 
         return push
 
@@ -446,105 +464,134 @@ class PushingPattern(MovementPattern):
             # turn right:
             angular = -1.0
 
-        robots, robots_center = get_neighbors(scan, 1.6)
-        min_dist = np.inf
-        for robot in robots_center:
-            if np.deg2rad(350) < robot[1] < np.deg2rad(10) and robot[0] < min_dist:
-                min_dist = robot[0]
-            if min_dist <= 1.6:
-                linear = linear * min_dist * 0.53
-
         linear, angular = self.scale_velocity(linear, angular)
         wall_follow_direction = Twist()
         wall_follow_direction.angular.z = angular
         wall_follow_direction.linear.x = linear
+        wall_follow_direction = self.avoid(wall_follow_direction)
 
         return wall_follow_direction
+
+    def avoid(self, behavior):
+        scan = self.current_scan
+        avoid = Twist()
+        linear = behavior.linear.x
+        angular = behavior.angular.z
+
+        if any(dist < 1.0 for dist in scan.ranges):
+            robots, robots_center = get_neighbors(scan, 1.6)
+            min_dist = 3.5
+            for robot in robots_center:
+
+                if np.deg2rad(270) < robot[1] < np.deg2rad(90) and robot[0] < min_dist:
+                    min_dist = robot[0]
+            self.publish_info(str(len(robots_center)) + " robots detected!")
+            self.publish_info("min_dist = " + str(min_dist))
+            if min_dist <= 0.5:
+                if get_distance(scan, 180) > 0.7:
+                    linear = -0.2
+                    angular = 0.0
+                else:
+                    linear = 0.0
+                    angular = 0.0
+            elif min_dist < 1.0:
+                linear = behavior.linear.x * min_dist * 0.1
+                angular = behavior.angular.z * min_dist * 0.6
+            elif min_dist < 1.6:
+                linear = behavior.linear.x * min_dist * 0.4
+                angular = behavior.angular.z * min_dist * 0.4
+                linear, angular = self.scale_velocity(linear, angular)
+
+        avoid.linear.x = linear
+        avoid.angular.z = angular
+
+        return avoid
 
     def stop(self):
         stop = Twist()
         self.command_publisher.publish(stop)
+        self.publish_info("command published: stop")
 
     def drive_backwards(self):
-
-        backwards, obstacle_free = ScanCalculationFunctions.potential_field(2.0, 0.7,
-                                                                            self.param_max_rotational_velocity,
-                                                                            self.param_max_translational_velocity,
-                                                                            0.12, self.current_scan,
-                                                                            5, None)
-
-        if not obstacle_free:
+        scan = self.current_scan
+        if any(dist < 0.8 for dist in scan.ranges):
+            self.publish_info("wait")
+            backwards = Twist()
+            if get_distance(scan, 180) > 0.8:
+                backwards.angular.z = 0.0
+                backwards.linear.x = - 0.2
             self.command_publisher.publish(backwards)
-            self.info.data = 'backwards START'
-            # self.information_publisher.publish(self.info)
-            time.sleep(0.8)
+            self.publish_info("command published: driving backwards")
+            time.sleep(1.1)
+            self.publish_info("backwards sleep beendet")
 
     def turn_once(self):
         self.turn_timer = Timer(self.param_turn_timer_period, self.stop)
         turn = Twist()
         turn.angular.z = self.param_max_rotational_velocity
-
+        self.protection.data = 'False'
+        self.protection_publisher.publish(self.protection)
         self.command_publisher.publish(turn)
+        self.publish_info("command published: turn")
         self.turn_timer.start()
-
-        self.info.data = 'turn_timer START'
-        # self.information_publisher.publish(self.info)
 
     def is_object_visible(self):
         self.search_object_timer.cancel()
         self.search_object_timer = Timer(self.param_object_timer_period, self.is_object_visible)
 
-        if (not self.turn_timer.is_alive()) and (self.state == State.SEARCH):
-            # self.publish_info('!!!Starte Überprüfung auf OBJEKT!!!')
+        if (not self.turn_timer.is_alive()) and self.state == State.SEARCH:
             self.turn_once()
             for i in range(0, 1000):
                 time.sleep(0.1)
                 self.update_is_object_in_image()
 
                 if not self.turn_timer.is_alive():
-                    # self.publish_info('!!!KEIN OBJEKT in Sicht!!!')
                     break
 
                 elif self.object_in_image:
-                    # self.publish_info('!!!OBJEKT in Sicht!!!')
                     self.turn_timer.cancel()
                     self.turn_timer = Timer(self.param_turn_timer_period, self.stop)
                     self.stop()
                     break
 
-        self.search_object_timer.start()
+        if not self.search_object_timer.is_alive():
+            self.search_object_timer.start()
 
     def is_goal_occluded(self):
         self.search_goal_timer.cancel()
         self.search_goal_timer = Timer(self.param_goal_timer_period, self.is_goal_occluded)
-
-        if (not has_neighbors(self.current_scan)) and (not self.turn_timer.is_alive()) and (
-                self.state == State.PUSH or self.state == State.CHECK_FOR_GOAL):
-            occluded = True
-            self.publish_info('!!!Starte Überprüfung auf ZIEL!!')
-            self.drive_backwards()
-            self.turn_once()
-            for i in range(0, 1000):
-                time.sleep(0.1)
-                self.update_is_goal_in_image()
-                if self.goal_in_image:
-                    occluded = False
-                    break
-                if not self.turn_timer.is_alive():
-                    break
-
-            if not occluded:
-                self.publish_info('!!!ZIEL in Sicht!!!')
+        if time.time() - self.last_goal_check > 7.0:
+            if not (self.state == State.CHECK_FOR_GOAL or self.state == State.PUSH):
+                occluded = False
             else:
-                self.publish_info('!!!KEIN ZIEL in Sicht!!!')
+                occluded = self.goal_is_occluded
+                if not self.turn_timer.is_alive():
+                    left, right = has_neighbors(self.current_scan)
+                    occluded = True
+                    self.publish_info("left = " + str(left) + " ,right = " + str(right))
+
+                    if left < 1 or right < 1:
+                        self.publish_info("is_goal_occluded? Status ist: " + str(self.state))
+                        self.state = State.CHECK_FOR_GOAL
+                        self.drive_backwards()
+                        self.turn_once()
+                        occluded = True
+                        for i in range(0, 1000):
+                            time.sleep(0.1)
+                            self.update_is_goal_in_image()
+                            if self.goal_in_image:
+                                occluded = False
+                            if not self.turn_timer.is_alive():
+                                break
 
             self.goal_is_occluded = occluded
+            self.last_goal_check = time.time()
         self.search_goal_timer.start()
 
     # FLAGS #
     def is_busy(self):
-        if (self.turn_timer.is_alive() or (not self.search_goal_timer.is_alive()) or (
-                not self.search_object_timer.is_alive())) and self.state != State.INIT:
+        if (self.turn_timer.is_alive() or (not self.search_object_timer.is_alive()) or (
+                not self.search_goal_timer.is_alive())) and self.state != State.INIT:
             return True
         else:
             return False
@@ -557,6 +604,8 @@ class PushingPattern(MovementPattern):
 
     def update_is_goal_in_image(self):
         image = self.current_image
+        if self.state == State.CHECK_FOR_GOAL:
+            cv.imwrite('Goal_In_Image.jpeg', image)
         lower_color = self.lower_goal_color
         upper_color = self.upper_goal_color
         self.goal_in_image = is_color_in_image(image, lower_color, upper_color)
@@ -569,10 +618,11 @@ class PushingPattern(MovementPattern):
         if self.object_in_image:
             robots, robots_center = get_neighbors(self.current_scan, 1.5)
             dist = get_mean_dist(self.current_scan, -10, 10)
-            if dist > 1.6:
+            if ((not self.state == State.APPROACH) and dist > 1.7) or dist > 1.5:
                 self.near_object = False
             for robot in robots_center:
                 if np.deg2rad(350) < robot[1] < np.deg2rad(10):
+                    self.publish_info("dist is not valid!")
                     dist_valid = False
 
         if not dist_valid:
@@ -593,6 +643,9 @@ class PushingPattern(MovementPattern):
     def update_is_max_transport_time_reached(self):
         if self.transport_start_time is None:
             self.transport_start_time = time.time()
+
+        if time.time() - self.transport_start_time > self.max_transport_time:
+            self.max_transport_time_reached = True
 
 
 def main(args=None):

@@ -631,6 +631,8 @@ class CagingPattern(MovementPattern):
         # self.command_publisher.publish(self.direction)
 
         # self.publish_info('caging')
+        self.publish_state()
+
         if self.max_transport_time_reached:
             self.state = State.STOP
         elif self.is_busy():
@@ -638,45 +640,45 @@ class CagingPattern(MovementPattern):
 
         self.update_flags()
         self.update_state()
-        self.publish_state()  # TODO: Wieder entfernen, nur zum Debuggen
         self.execute_state()
 
     def update_flags(self):
         # self.publish_info('update_flags')
-        old_quorum = self.quorum
-        old_goal_in_image = self.goal_in_image
+        if self.state != State.INIT:
+            old_quorum = self.quorum
+            old_goal_in_image = self.goal_in_image
 
-        self.update_is_max_transport_time_reached()
+            self.update_is_max_transport_time_reached()
 
-        if self.state == State.SEARCH:  # or self.state == State.APPROACH:
-            self.update_object_infos(self.current_scan, self.current_image, self.lower_object_color,
-                                     self.upper_object_color)
-            self.quorum = False
-            self.closure = False
+            if self.state == State.SEARCH:  # or self.state == State.APPROACH:
+                self.update_object_infos(self.current_scan, self.current_image, self.lower_object_color,
+                                         self.upper_object_color)
+                self.quorum = False
+                self.closure = False
 
-        if self.state == State.APPROACH or self.state == State.SURROUND or self.state == State.SURVEY_OBJECT:
-            self.update_is_near_object()
+            if self.state == State.APPROACH or self.state == State.SURROUND or self.state == State.SURVEY_OBJECT:
+                self.update_is_near_object()
 
-        if self.state == State.SURROUND or self.state == State.TRANSPORT:
-            self.update_Q()
-            self.update_is_closure()
-            self.update_is_quorum(self.current_scan)
-            if (not self.quorum) and old_quorum and self.quorum_switch_counter > 30:
-                self.quorum = True
-                self.quorum_switch_counter = 0
-            else:
-                self.quorum_switch_counter += 1
+            if self.state == State.SURROUND or self.state == State.TRANSPORT:
+                self.update_Q()
+                self.update_is_closure()
+                self.update_is_quorum(self.current_scan)
+                if (not self.quorum) and old_quorum and self.quorum_switch_counter > 30:
+                    self.quorum = True
+                    self.quorum_switch_counter = 0
+                else:
+                    self.quorum_switch_counter += 1
 
-        if self.state == State.TRANSPORT:
-            self.update_goal_position()
-            self.goal_in_image = is_color_in_image(self.current_image, self.lower_goal_color, self.upper_goal_color)
-            if old_goal_in_image != self.goal_in_image:
-                self.goal_msg.data = str(self.get_namespace()) + ' ' + self.calculate_goal_position()
-                self.goal_publisher.publish(self.goal_msg)
+            if self.state == State.TRANSPORT:
+                self.update_goal_position()
+                self.goal_in_image = is_color_in_image(self.current_image, self.lower_goal_color, self.upper_goal_color)
+                if old_goal_in_image != self.goal_in_image:
+                    self.goal_msg.data = str(self.get_namespace()) + ' ' + self.calculate_goal_position()
+                    self.goal_publisher.publish(self.goal_msg)
 
-        if old_quorum != self.quorum:
-            self.quorum_msg.data = str(self.get_namespace()) + ' ' + str(self.quorum)
-            self.quorum_publisher.publish(self.quorum_msg)
+            if old_quorum != self.quorum:
+                self.quorum_msg.data = str(self.get_namespace()) + ' ' + str(self.quorum)
+                self.quorum_publisher.publish(self.quorum_msg)
 
     def update_state(self):
         # self.publish_info('update_state')
@@ -837,7 +839,7 @@ class CagingPattern(MovementPattern):
             if np.deg2rad(340) < robot[1] < np.deg2rad(20) and robot[0] < min_dist:
                 min_dist = robot[0]
             if min_dist <= 1.6:
-                linear = linear * min_dist * 0.5  # 0.53
+                linear = linear * min_dist * 0.5
 
         linear, angular = self.scale_velocity(linear, angular)
         wall_follow_direction = Twist()
@@ -1270,6 +1272,9 @@ class CagingPattern(MovementPattern):
     def update_is_max_transport_time_reached(self):
         if self.transport_start_time is None:
             self.transport_start_time = time.time()
+
+        if time.time() - self.transport_start_time > self.max_transport_time:
+            self.max_transport_time_reached = True
 
     def get_trajectory(self):
         initialize = self.trajectory is None or time.time() - self.last_call_time_get_trajectory > 10.0

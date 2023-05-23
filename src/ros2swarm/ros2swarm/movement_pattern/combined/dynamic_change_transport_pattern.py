@@ -527,26 +527,27 @@ class DynamicChangeTransportPattern(MovementPattern):
         # self.protection_publisher.publish(self.protection)
         # self.command_publisher.publish(self.direction)
 
-        # self.publish_info('dynamic_change')
-        if self.is_busy():
+        self.publish_state()
+
+        if self.max_transport_time_reached:
+            self.state = State.STOP
+        elif self.is_busy():
             return
 
         self.update_flags()
         self.update_state()
-        self.publish_state()  # TODO: Wieder entfernen, nur zum Debuggen
         self.execute_state()
 
     def update_flags(self):
         # self.publish_info('update_flags')
-
-        if self.state == State.SEARCH or self.state == State.APPROACH:
-            self.update_is_object_in_image()
-
-        if self.state == State.APPROACH or self.state == State.SURVEY_OBJECT:
-            self.update_is_near_object()
-
-        if self.state == State.CAGING or self.state == State.PUSHING:
+        if self.state != State.INIT:
             self.update_is_max_transport_time_reached()
+
+            if self.state == State.SEARCH or self.state == State.APPROACH:
+                self.update_is_object_in_image()
+
+            if self.state == State.APPROACH or self.state == State.SURVEY_OBJECT:
+                self.update_is_near_object()
 
     def update_state(self):
         # self.publish_info('update_state')
@@ -682,10 +683,10 @@ class DynamicChangeTransportPattern(MovementPattern):
         robots, robots_center = get_neighbors(self.current_scan, 1.6)
         min_dist = np.inf
         for robot in robots_center:
-            if np.deg2rad(350) < robot[1] < np.deg2rad(10) and robot[0] < min_dist:
+            if np.deg2rad(340) < robot[1] < np.deg2rad(20) and robot[0] < min_dist:
                 min_dist = robot[0]
             if min_dist <= 1.6:
-                linear = linear * min_dist * 0.53
+                linear = linear * min_dist * 0.5
 
         linear, angular = self.scale_velocity(linear, angular)
         wall_follow_direction = Twist()
@@ -849,13 +850,13 @@ class DynamicChangeTransportPattern(MovementPattern):
         e = d_max * 0.076
         r_cage = 0.5 * d_max + self.r + self.l + e
         min_robots_caging = (2 * np.pi * r_cage) / (2 * self.r + d_min)
-        number_of_available_robots = 0  # TODO: Abschätzung wie viele Roboter vorhanden sind
+        number_of_available_robots = 5.0  # TODO: Abschätzung wie viele Roboter vorhanden sind
 
         # TODO: Entscheidungsregeln für Pushing und Caging festlegen
         pushing = True
         caging = True
 
-        if not convex or weight > 1000:
+        if not convex or weight > 500:
             pushing = False
         if min_robots_caging > number_of_available_robots or weight > 100:
             caging = False
@@ -864,8 +865,8 @@ class DynamicChangeTransportPattern(MovementPattern):
         if not pushing and not caging:
             pushing = True
 
-        self.pushing = False  # pushing
-        self.caging = True  # caging
+        self.pushing = pushing
+        self.caging = caging
 
         # TODO: Wieder entfernen, nur zum auswerten
         height = self.object_height

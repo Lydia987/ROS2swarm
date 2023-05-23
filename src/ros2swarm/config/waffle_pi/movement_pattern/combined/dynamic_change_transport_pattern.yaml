@@ -12,11 +12,11 @@
     turn_timer_period: 3.46 #s
 
     # caging and pushing pattern
-    goal_search_timer_period: 10.0 # s
-    object_search_timer_period: 2.0 # s
+    goal_search_timer_period: 12.0 # s
+    object_search_timer_period: 1.0 # s
 
     # search_object_pattern
-    wall_follow_timer_period: 20.0 # s
+    wall_follow_timer_period: 10.0 # s
 
     # caging_pattern
     robot_length: 0.20925 # m
