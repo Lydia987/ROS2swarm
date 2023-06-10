@@ -21,8 +21,8 @@
     # caging_pattern
     robot_length: 0.20925 # m
     robot_radius: 0.220 # m
-    object_name: 'Circle_d3_h0,5' # Gazebomodelname  # Circle_d3_h0,5 | Green | Green_Quader_3x2 | Green_Quader_4x4x2 | unit_cylinder_radius_1,5m | concave
-    goal_name: 'Goal' # Red | Goal Gazebomodelname
+    object_name: 'Circle_1,25x1,2_d0,8' # Gazebomodelname  # Circle_1,25x1,2_d0,8 | concave_4x3,66x0,2_d0,8 | Rectangle_3x2x0,2_d0,8 | Triangle_3x0,2_d0,8
+    goal_name: 'Goal' # Gazebomodelname
 
     # random_walk_pattern
     random_walk_timer_period: 0.25
@@ -31,6 +31,9 @@
     random_walk_rot_interval: 3.5
     random_walk_lin_interval_min: 10.0
     random_walk_lin_interval_max: 15.0
+
+    # evaluation
+    evaluation_path: '/src/evaluation/' # /home/lydia/
 
 
 

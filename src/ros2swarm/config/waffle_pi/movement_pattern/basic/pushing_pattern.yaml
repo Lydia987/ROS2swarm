@@ -11,6 +11,7 @@
     max_translational_velocity: 0.5 # 0.26 # m/s
     max_rotational_velocity: 1.82 # rad/s
 
-    # nur zur Auswertung
-    object_name: 'Green_Quader_4x4x2' # Gazebomodelname  # Green | Green_Quader_3x2 | Green_Quader_4x4x2 | unit_cylinder_radius_1,5m | concave
+    # evaluation
+    object_name: 'Circle_1,25x1,2_d0,8' # Gazebomodelname  # Circle_1,25x1,2_d0,8 | concave_4x3,66x0,2_d0,8 | Rectangle_3x2x0,2_d0,8 | Triangle_3x0,2_d0,8
     goal_name: 'Goal' # Gazebomodelname
+    evaluation_path: '/src/evaluation/' # /home/lydia/

@@ -20,9 +20,9 @@ bridge = CvBridge()
 
 
 def get_neighbors(scan_msg, max_range):
-    # TODO: Params für den threshold und width abhängig von roboter typ anlegen
-    # center: erster wert entfernung in meter , zweiter wert rad (vorne 0, links rum steigend bis 2pi)
-    # roboter werden zwischen 0.2m und 3.5m erkannt min_range=0, max_range=3.5, threshold=0.35, min_width=0, max_width=15
+    """ returns all robots in the radius max_range """
+    # TODO: Create params for threshold and width depending on robot type
+    # robots are detected between 0.2m and 3.5m min_range=0, max_range=3.5, threshold=0.35, min_width=0, max_width=15
     robots, robots_center = ScanCalculationFunctions.identify_robots(laser_scan=scan_msg, min_range=0,
                                                                      max_range=max_range, threshold=0.35, min_width=0,
                                                                      max_width=15)
@@ -30,6 +30,7 @@ def get_neighbors(scan_msg, max_range):
 
 
 def get_image_contour(img, lower_color, upper_color):
+    """ returns a contour if exactly one contour is detected in the image """
     hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
     grey = cv.inRange(hsv, lower_color, upper_color)
     median = cv.medianBlur(grey, 5)
@@ -46,6 +47,7 @@ def get_image_contour(img, lower_color, upper_color):
 
 
 def get_center(contour):
+    """ Returns the center of the contour in pixel. """
     x = 0
     y = 0
     M = cv.moments(contour)
@@ -59,8 +61,7 @@ def get_center(contour):
 
 def get_mean_dist(scan_msg, min_angle, max_angle):
     """ calculates the mean distance to obstacles between the min_angle and max_angle """
-    """ calculates the mean distance to obstacles between the min_angle and max_angle """
-    R = scan_msg.range_max
+    max_range = scan_msg.range_max
     sum_dist = 0.0
     start_angle = np.deg2rad(min_angle)  # rad (front = 0 rad)
     end_angle = np.deg2rad(max_angle)  # rad (front = 0 rad)
@@ -75,8 +76,8 @@ def get_mean_dist(scan_msg, min_angle, max_angle):
         dist_i = scan_msg.ranges[i]
         if np.isnan(dist_i):
             dist_i = 0.0
-        if np.isinf(dist_i) or dist_i > R:
-            dist_i = R
+        if np.isinf(dist_i) or dist_i > max_range:
+            dist_i = max_range
 
         sum_dist += dist_i
 
@@ -85,6 +86,7 @@ def get_mean_dist(scan_msg, min_angle, max_angle):
 
 
 def get_distance(scan_msg, degree):
+    """ returns the distance in the direction of the given angle """
     rad = np.deg2rad(degree)
     increment = scan_msg.angle_increment
     min_rad = scan_msg.angle_min
@@ -97,8 +99,7 @@ def get_distance(scan_msg, degree):
 
 
 def has_neighbors(scan_msg):
-    # center: erster wert entfernung in meter, zweiter wert rad (vorne 0, links rum steigend bis 2pi)
-    # roboter werden zwischen 0,2 m und 3 m erkannt min_range=0, max_range=3, threshold=0.35, min_width=0, max_width=15
+    """ returns the number of robots to the right and to the left of it """
     robots, robots_center = ScanCalculationFunctions.identify_robots(laser_scan=scan_msg, min_range=0, max_range=1.5,
                                                                      threshold=0.35, min_width=0, max_width=15)
     left = 0
@@ -114,6 +115,7 @@ def has_neighbors(scan_msg):
 
 
 def is_color_in_image(image, lower_color, upper_color):
+    """ returns true if the image contains the given color """
     is_in_image = False
     hsv = cv.cvtColor(image, cv.COLOR_BGR2HSV)
     obj_mask = cv.inRange(hsv, lower_color, upper_color)
@@ -127,7 +129,9 @@ def is_color_in_image(image, lower_color, upper_color):
 
 class PushingPattern(MovementPattern):
     """
-    Pattern to search and drive to an object with a defined color.
+    Pattern to push an object to a goal.
+
+    The object is pushed when the goal is occluded.
     """
 
     def __init__(self):
@@ -144,7 +148,8 @@ class PushingPattern(MovementPattern):
                 ('max_translational_velocity', None),
                 ('max_rotational_velocity', None),
                 ('object_name', None),
-                ('goal_name', None)
+                ('goal_name', None),
+                ('evaluation_path', None)
             ])
 
         # PARAMS #
@@ -163,6 +168,7 @@ class PushingPattern(MovementPattern):
         self.param_move_around_object_timer_period = self.get_parameter(
             "wall_follow_timer_period").get_parameter_value().double_value
         self.max_transport_time = self.get_parameter("max_transport_time").get_parameter_value().double_value
+        self.evaluation_path = self.get_parameter("evaluation_path").get_parameter_value().string_value
 
         # SUBSCRIBER #
         self.scan_subscription = self.create_subscription(LaserScan, self.get_namespace() + '/scan',
@@ -186,7 +192,7 @@ class PushingPattern(MovementPattern):
         self.transport_start_time = None
         self.random_walk_latest = Twist()
 
-        # OBJEKT #
+        # OBJECT #
         self.lower_object_color = np.array([50, 50, 50])
         self.upper_object_color = np.array([70, 255, 255])
         self.object_in_image = False
@@ -216,7 +222,7 @@ class PushingPattern(MovementPattern):
         # COUNTER #
         self.state_switch_counter = 0
 
-        # TEST und AUSWERTUNG #
+        # TEST AND EVALUATION #
         self.model_states_subscription = self.create_subscription(ModelStates, '/gazebo/model_states',
                                                                   self.model_states_callback,
                                                                   qos_profile=qos_profile_sensor_data)
@@ -226,9 +232,11 @@ class PushingPattern(MovementPattern):
         self.current_object_center = [[], [], []]
         self.goal_position = [[], []]
         self.current_pose = [[], [], []]
+        self.robot_name = str(self.get_namespace())[-1]
 
     # PUBLISHER #
-    def publish_state(self):
+    def save_evaluation_data(self):
+        """ saves all evaluation data in a txt file """
         self.state_list[0].append([time.time()])
         self.state_list[1][0].append(self.direction.linear.x)
         self.state_list[1][1].append(self.direction.angular.z)
@@ -241,17 +249,18 @@ class PushingPattern(MovementPattern):
         self.state_list[4][2].append(np.rad2deg(self.current_object_center[2]))
         self.state_list[5][0].append(self.goal_position[0])
         self.state_list[5][1].append(self.goal_position[1])
-        with open('pushing_state_list_' + str(self.get_namespace())[-1] + '.txt', 'w') as doc:
+        with open(self.evaluation_path + 'pushing_state_list_' + self.robot_name + '.txt', 'w') as doc:
             doc.write(str(self.state_list))
 
-        self.publish_state_counter -= 1
-        if self.publish_state_counter <= 0:
-            self.publish_state_counter = 10
-            self.info.data = '__' + str(self.state) + '__ goal_is_occluded=' + str(
-                self.goal_is_occluded) + ' object_in_image=' + str(self.object_in_image)
-            self.information_publisher.publish(self.info)
+        # self.publish_state_counter -= 1
+        # if self.publish_state_counter <= 0:
+        #     self.publish_state_counter = 10
+        #     self.info.data = '__' + str(self.state) + '__ goal_is_occluded=' + str(
+        #         self.goal_is_occluded) + ' object_in_image=' + str(self.object_in_image)
+        #     self.information_publisher.publish(self.info)
 
     def model_states_callback(self, model_states):
+        """Call back if a new model_states msg is available."""
         index = 0
         for name in model_states.name:
             if name == 'robot_name_' + self.get_namespace()[-1]:
@@ -301,9 +310,9 @@ class PushingPattern(MovementPattern):
         """Call back if a new image msg is available."""
         self.current_image = bridge.imgmsg_to_cv2(raw_image_msg, desired_encoding='passthrough')
 
-    # STATUS AKTUALISIERUNG UND AUSFÜHRUNG #
+    # STATUS UPDATE AND EXECUTION #
     def pushing(self):
-        self.publish_state()
+        self.save_evaluation_data()
 
         if self.max_transport_time_reached:
             self.state = State.STOP
@@ -358,14 +367,14 @@ class PushingPattern(MovementPattern):
                     self.state = State.MOVE_AROUND_OBJECT
                     self.move_around_object_start_time = time.time()
 
-        if self.state == State.SEARCH and old_state == State.APPROACH and self.state_switch_counter < 15:
+        if self.state == State.SEARCH and old_state == State.APPROACH and self.state_switch_counter < 5:
             self.state = old_state
             self.state_switch_counter += 1
         else:
             self.state_switch_counter = 0
 
     def execute_state(self):
-        # Führt Verhalten abhängig von Status aus
+        """ Executes behavior depending on status. """
         if self.state == State.INIT:
             fully_initialized = not (self.current_image is None or self.current_scan is None)
             if fully_initialized:
@@ -406,26 +415,30 @@ class PushingPattern(MovementPattern):
         self.command_publisher.publish(self.direction)
         self.publish_info("published command: " + str(self.state))
 
-    # BEWEGUNGSMUSTER #
+    # MOVEMENT PATTERNS #
     def approach(self):
+        """ drives towards object center """
         img = self.current_image
         img_width = img.shape[1]
         contour = get_image_contour(img, self.lower_object_color, self.upper_object_color)
         self.object_in_center = False
         if contour is not None:
             x, y = get_center(contour)
-            # normiert Wert: 1 (ganz links) und -1 (ganz rechts)
+            # normalized value: 1 (far left) and -1 (far right)
             turn_intensity_and_direction = (2 * x / img_width - 1) * -1
             if abs(turn_intensity_and_direction) < 0.05:
                 self.object_in_center = True
-            # draw the contour and center of the shape on the image TODO: wieder entfernen
+            # draw the contour and center of the shape on the image, for evaluation only
             cv.drawContours(img, [contour], -1, (255, 0, 0), 2)
             cv.circle(img, (x, y), 7, (255, 0, 0), -1)
-            cv.imwrite('ApproachCenter.jpeg', img)
+            cv.imwrite(self.evaluation_path + 'ApproachCenter_' + self.robot_name + '.jpeg', img)
         else:
             turn_intensity_and_direction = 0.0
 
-        linear = self.param_max_translational_velocity * 0.8
+        if self.near_object:
+            linear = 0.0
+        else:
+            linear = self.param_max_translational_velocity * 0.8
         angular = turn_intensity_and_direction * self.param_max_rotational_velocity
 
         approach = Twist()
@@ -436,11 +449,12 @@ class PushingPattern(MovementPattern):
         return approach
 
     def push(self):
+        """ Drives straight out when no robot in front of him. """
         push = Twist()
         robots, robots_center = get_neighbors(self.current_scan, 1.6)
         for robot in robots_center:
             if np.deg2rad(350) < robot[1] < np.deg2rad(10):
-                self.publish_info("roboter vor mir! ich bleibe stehen")
+                # self.publish_info("robot in front of me! I stand still")
                 return push
         if get_mean_dist(self.current_scan, -15, 15) > 1.0:
             push.linear.x = self.param_max_translational_velocity
@@ -508,34 +522,32 @@ class PushingPattern(MovementPattern):
         return avoid
 
     def stop(self):
+        """ Stops the robot. """
         stop = Twist()
         self.command_publisher.publish(stop)
-        self.publish_info("command published: stop")
 
     def drive_backwards(self):
         scan = self.current_scan
         if any(dist < 0.8 for dist in scan.ranges):
-            self.publish_info("wait")
             backwards = Twist()
             if get_distance(scan, 180) > 0.8:
                 backwards.angular.z = 0.0
                 backwards.linear.x = - 0.2
             self.command_publisher.publish(backwards)
-            self.publish_info("command published: driving backwards")
             time.sleep(1.1)
-            self.publish_info("backwards sleep beendet")
 
     def turn_once(self):
+        """ Turns once. """
         self.turn_timer = Timer(self.param_turn_timer_period, self.stop)
         turn = Twist()
         turn.angular.z = self.param_max_rotational_velocity
         self.protection.data = 'False'
         self.protection_publisher.publish(self.protection)
         self.command_publisher.publish(turn)
-        self.publish_info("command published: turn")
         self.turn_timer.start()
 
     def is_object_visible(self):
+        """ Rotates a maximum of once and stops as soon as the object is included in the image and stets object_in_image to true if the object was in the image. """
         self.search_object_timer.cancel()
         self.search_object_timer = Timer(self.param_object_timer_period, self.is_object_visible)
 
@@ -558,20 +570,21 @@ class PushingPattern(MovementPattern):
             self.search_object_timer.start()
 
     def is_goal_occluded(self):
+        """ Set goal_is _occluded to true if the target is not visible around it. """
         self.search_goal_timer.cancel()
         self.search_goal_timer = Timer(self.param_goal_timer_period, self.is_goal_occluded)
-        if time.time() - self.last_goal_check > 7.0:
-            if not (self.state == State.CHECK_FOR_GOAL or self.state == State.PUSH):
+        # self.publish_info("is_goal_occluded, last_check = " + str(time.time() - self.last_goal_check) + "s")
+        if time.time() - self.last_goal_check > 1.0:
+            if (not self.state == State.CHECK_FOR_GOAL) and (not self.state == State.PUSH):
                 occluded = False
             else:
                 occluded = self.goal_is_occluded
                 if not self.turn_timer.is_alive():
                     left, right = has_neighbors(self.current_scan)
                     occluded = True
-                    self.publish_info("left = " + str(left) + " ,right = " + str(right))
+                    # self.publish_info("left = " + str(left) + " ,right = " + str(right))
 
                     if left < 1 or right < 1:
-                        self.publish_info("is_goal_occluded? Status ist: " + str(self.state))
                         self.state = State.CHECK_FOR_GOAL
                         self.drive_backwards()
                         self.turn_once()
@@ -604,8 +617,6 @@ class PushingPattern(MovementPattern):
 
     def update_is_goal_in_image(self):
         image = self.current_image
-        if self.state == State.CHECK_FOR_GOAL:
-            cv.imwrite('Goal_In_Image.jpeg', image)
         lower_color = self.lower_goal_color
         upper_color = self.upper_goal_color
         self.goal_in_image = is_color_in_image(image, lower_color, upper_color)
@@ -630,6 +641,7 @@ class PushingPattern(MovementPattern):
 
     # BERECHNUNGEN #
     def scale_velocity(self, translational_velocity, rotational_velocity):
+        """ scales the speed so that the maximum values are not exceeded. """
         if abs(translational_velocity) > self.param_max_translational_velocity:
             scale = self.param_max_translational_velocity / abs(translational_velocity)
             translational_velocity = translational_velocity * scale

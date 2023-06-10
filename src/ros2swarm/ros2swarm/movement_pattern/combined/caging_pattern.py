@@ -23,7 +23,7 @@ bridge = CvBridge()
 
 
 def get_shape_points(odometry_list):
-    # Punkte der Shape aus Laserdaten und Roboterposition berechnen
+    """ calculates points of the shape from the laser data and robot positions contained in the odometry_list """
     x = []
     y = []
     for j in range(len(odometry_list)):
@@ -50,80 +50,76 @@ def get_shape_points(odometry_list):
 
 
 def points2image(x, y):
-    # Punkte der Shape in Bild umwandeln
+    """ returns an image created from the passed points """
     scale = 100
     frame = 200 / scale
 
-    # Alle Punkte in den positiven bereich verschieben
+    # Move all points to the positive area
     x = np.add(x, np.min(x) * -1 + frame) * scale
     y = np.add(y, np.min(y) * -1 + frame) * scale
 
-    # leeres Bild erstellen
+    # Create empty image
     img = np.zeros((int(np.max(y) + frame * scale), int(np.max(x) + frame * scale)), dtype=np.uint8)
 
-    # Zeichne alle Punkte in das Bild
+    # Draw all points in the image
     for point in zip(*[x, y]):
         cv.circle(img, (int(point[0]), int(point[1])), 1, 255, -1)
 
     img = cv.cvtColor(img, cv.COLOR_GRAY2BGR)
-    cv.imwrite("/home/lydia/Bilder/OriginalShape.jpeg", img)  # TODO: wieder entfernen
     return img
 
 
 def rectify_img(img):
-    # Bild entzerren
-    angle = 14.8  # Rotationswinkel im Uhrzeigersinn
-    stretch = 0.526  # Streckung
-
-    # Abmessungen des Bildes
+    """ rectifies the image """
+    angle = 14.8  # Clockwise rotation angle
+    stretch = 0.526
     height, width = img.shape[:2]
 
-    # Rotieren
+    # rotate
     M = cv.getRotationMatrix2D((width / 2, height / 2), angle, 1)
     img = cv.warpAffine(img, M, (width, height))
 
-    # Strecken
+    # stretch
     new_height = int(height * stretch)
 
-    # Skalieren
+    # scale
     img = cv.resize(img, (width, new_height))
 
-    # Zurückdrehen
+    # rotate back
     M = cv.getRotationMatrix2D((width / 2, new_height / 2), 360 - angle, 1)
     img = cv.warpAffine(img, M, (width, new_height))
-
-    cv.imwrite("/home/lydia/Bilder/EntzerrteShape.jpeg", img)  # TODO: wieder entfernen
     return img
 
 
 def get_contours(img):
+    """ returns a list with the contours contained in the image """
     gray = cv.cvtColor(img, cv.COLOR_RGB2GRAY)
 
     for i in range(4):
-        # Bild glätten
+        # Smooth image
         median = cv.medianBlur(gray, 5)
         blurred = cv.GaussianBlur(median, (5, 5), 0)
 
-        # Lücken schließen
+        # Close gaps
         kernel = np.ones((5, 5), np.uint8)
         closing = cv.morphologyEx(blurred, cv.MORPH_CLOSE, kernel)
         opening = cv.morphologyEx(closing, cv.MORPH_OPEN, kernel)
 
-        # Schwellenwert anwenden
+        # Apply threshold
         thresh = cv.threshold(opening, 1, 255, cv.THRESH_BINARY)[1]
         gray = thresh
 
     edges = cv.Canny(gray, 100, 200)
 
-    # Konturen extrahieren
+    # Extract contours
     contours = cv.findContours(edges, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
     contours = imutils.grab_contours(contours)
 
-    cv.imwrite("/home/lydia/Bilder/GeglätteteShape.jpeg", gray)  # TODO: wieder entfernen
     return contours
 
 
-def get_approx_dmin(img, robot_name):
+def get_approx_dmin(img, evaluation_path, robot_name):
+    """ returns an approximated shape and its smallest diameter """
     contours = get_contours(img)
     contour = None
     w = 0.0
@@ -134,9 +130,9 @@ def get_approx_dmin(img, robot_name):
     rect_new = None
     approx = None
 
-    # größte contour finden
+    # Find largest contour
     for contour in contours:
-        # Umgebendes Rechteck berechnen
+        # Calculate surrounding rectangle
         rect_new = cv.minAreaRect(contour)
         w_new = rect_new[1][0]
         h_new = rect_new[1][1]
@@ -145,36 +141,38 @@ def get_approx_dmin(img, robot_name):
             w = w_new
             h = h_new
             rect = rect_new
-            # contour approximieren
+            # approximate contour
             approx = cv.approxPolyDP(contour, 15, True)
 
     d_min = min(w, h)
 
+    # only for evaluation purposes
     box = np.intp(cv.boxPoints(rect))
     cv.drawContours(img, [box], 0, (0, 255, 0), 2)
     cv.drawContours(img, [approx], -1, (0, 0, 255), 2)
-    cv.imwrite("/home/lydia/Bilder/AusgewerteteShape" + robot_name + ".jpeg", img)  # TODO: wieder entfernen
+    cv.imwrite(evaluation_path + "EvaluatedShape_" + robot_name + ".jpeg", img)
 
     return approx, d_min / 100
 
 
 def approx2contour(approx):
+    """ returns the contour of the approximated shape """
     contour = []
     line_points = []
 
     for i in range(len(approx) - 1):
         p1 = approx[i][0]
         p2 = approx[i + 1][0]
-        # Bestimmung der Steigung
+        # Determination of the slope
         if p2[0] - p1[0] != 0:
             m = (p2[1] - p1[1]) / (p2[0] - p1[0])
         else:
             m = np.sign(p2[1] - p1[1]) * 9999999999999999
 
-        # Bestimmung des Y-Achsenabschnitts
+        # Determination of the Y-axis intercept
         b = p1[1] - m * p1[0]
 
-        # Bestimmung des größeren und kleineren Punkts
+        # Determination of the larger and smaller point
         if p1[0] < p2[0]:
             x1 = p1[0]
             x2 = p2[0]
@@ -192,8 +190,11 @@ def approx2contour(approx):
     return contour
 
 
-def get_dmax(contour, robot_name):
+def get_dmax(contour, evaluation_path, robot_name):
+    """ Returns the maximum diameter of the contour. """
     d_max = 0.0
+
+    # for evaluation purposes only
     max_line = []
 
     for i in range(len(contour)):
@@ -203,36 +204,36 @@ def get_dmax(contour, robot_name):
             dist = np.linalg.norm(p1 - p2)
             if dist > d_max:
                 d_max = dist
-                # TODO: wieder entfernen
+                # for evaluation purposes only
                 max_line = [(int(p1[0]), int(p1[1])), (int(p2[0]), int(p2[1]))]
 
-    # draw d_max in img TODO: wieder entfernen
-    img = cv.imread("/home/lydia/Bilder/AusgewerteteShape" + robot_name + ".jpeg")
+    # draws d_max in img, for evaluation purposes only
+    img = cv.imread(evaluation_path + "EvaluatedShape_" + robot_name + ".jpeg")
     cv.line(img, max_line[0], max_line[1], (255, 255, 0), 2)
-    cv.imwrite("/home/lydia/Bilder/AusgewerteteShape" + robot_name + ".jpeg", img)
+    cv.imwrite(evaluation_path + "EvaluatedShape_" + robot_name + ".jpeg", img)
 
     return d_max / 100
 
 
 def get_neighbors(scan_msg, max_range):
-    # TODO: Params für den threshold und width abhängig von roboter typ anlegen
-    # center: erster wert entfernung in meter , zweiter wert rad (vorne 0, links rum steigend bis 2pi)
-    # roboter werden zwischen 0.2m und 3.5m erkannt min_range=0, max_range=3.5, threshold=0.35, min_width=0, max_width=15
+    """ returns all robots in the radius max_range """
+    # TODO: Create params for threshold and width depending on robot type
+    # robots are detected between 0.2m and 3.5m min_range=0, max_range=3.5, threshold=0.35, min_width=0, max_width=15
     robots, robots_center = ScanCalculationFunctions.identify_robots(laser_scan=scan_msg, min_range=0,
                                                                      max_range=max_range, threshold=0.35, min_width=0,
                                                                      max_width=15)
     return robots, robots_center
 
 
-def get_centroid(img):
+def get_centroid(img, evaluation_path, robot_name):
+    """ returns the center of the shape in the image in pixels """
+
     x = 0
     y = 0
 
-    # Nur damit Kontur in anderer Farbe eingezeichnet werden kann TODO: wieder entfernen
     img = cv.cvtColor(img, cv.COLOR_GRAY2RGB)
-
-    grey = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
-    median = cv.medianBlur(grey, 5)
+    gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+    median = cv.medianBlur(gray, 5)
     blurred = cv.GaussianBlur(median, (5, 5), 0)
     thresh = cv.threshold(blurred, 60, 255, cv.THRESH_BINARY)[1]
 
@@ -248,19 +249,20 @@ def get_centroid(img):
         if M["m00"] != 0:
             x = int(M["m10"] / M["m00"])
             y = int(M["m01"] / M["m00"])
-        # draw the contour and center of the shape on the image TODO: wieder entfernen
+
+        # draw the contour and center of the shape on the image, for evaluation purposes only
         cv.drawContours(img, [c], -1, (255, 0, 0), 2)
         cv.circle(img, (x, y), 7, (255, 0, 0), -1)
         cv.putText(img, str(it), (x - 50, y - 50), cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
 
-    # speichert Bild TODO: wieder entfernen
-    cv.imwrite('Thresh.jpeg', thresh)
-    cv.imwrite('Center.jpeg', img)
+    # for evaluation purposes only
+    cv.imwrite(evaluation_path + 'Center_' + robot_name + '.jpeg', img)
 
     return x, y
 
 
 def get_distance(scan_msg, degree):
+    """ returns the distance in the direction of the given angle """
     rad = np.deg2rad(degree)
     increment = scan_msg.angle_increment
     min_rad = scan_msg.angle_min
@@ -273,6 +275,7 @@ def get_distance(scan_msg, degree):
 
 
 def is_color_in_image(image, lower_color, upper_color):
+    """ returns true if the image contains the given color """
     is_in_image = False
     hsv = cv.cvtColor(image, cv.COLOR_BGR2HSV)
     obj_mask = cv.inRange(hsv, lower_color, upper_color)
@@ -306,8 +309,7 @@ def s(x, y, r, center):
     Signed distance function for a circle with center (cx, cy) and radius r.
     Returns a 2D array of signed distances, evaluated at the points (x, y).
     """
-    # Eigentlich richtige Funktion, die aber aufgrund von anderen fehlern aktuell noch dazu führt das die Roboter stehen bleiben
-    # TODO: wieder einkommentieren wenn der Fehler behoben wurde
+    # Actually correct function, but due to other errors currently still leads to the fact that the robots stop
     # cx = center[0]
     # cy = center[1]
     #
@@ -321,9 +323,10 @@ def s(x, y, r, center):
     # if d < r:
     #     shape = -shape
 
-    # TODO: wieder auskommentieren wenn der Fehler behoben wurde
+    # TODO: comment out again when the error is fixed
     circle_function = (x - center[0]) ** 2 + (y - center[1]) ** 2
     shape = circle_function - r ** 2
+
     # if circle_function - r ** 2 < 0:
     #     shape = -shape
     return shape
@@ -331,10 +334,10 @@ def s(x, y, r, center):
 
 def get_mean_dist(scan_msg, min_angle, max_angle):
     """ calculates the mean distance to obstacles between the min_angle and max_angle """
-    R = scan_msg.range_max  # repulsive force up to R in meter
+    max_range = scan_msg.range_max
     sum_dist = 0.0
-    start_angle = np.deg2rad(min_angle)  # rad (front = 0 rad)
-    end_angle = np.deg2rad(max_angle)  # rad (front = 0 rad)
+    start_angle = np.deg2rad(min_angle)
+    end_angle = np.deg2rad(max_angle)
 
     start = int((start_angle - scan_msg.angle_min) / scan_msg.angle_increment)
     end = int((end_angle - scan_msg.angle_min) / scan_msg.angle_increment)
@@ -346,8 +349,8 @@ def get_mean_dist(scan_msg, min_angle, max_angle):
         dist_i = scan_msg.ranges[i]
         if np.isnan(dist_i):
             dist_i = 0.0
-        if np.isinf(dist_i) or dist_i > R:
-            dist_i = R
+        if np.isinf(dist_i) or dist_i > max_range:
+            dist_i = max_range
 
         sum_dist += dist_i
 
@@ -375,7 +378,8 @@ class CagingPattern(MovementPattern):
                 ('robot_radius', None),
                 ('robot_length', None),
                 ('object_name', None),
-                ('goal_name', None)
+                ('goal_name', None),
+                ('evaluation_path', None)
             ])
 
         # PARAMS #
@@ -392,6 +396,7 @@ class CagingPattern(MovementPattern):
         self.r = self.get_parameter("robot_radius").get_parameter_value().double_value
         self.l = self.get_parameter("robot_length").get_parameter_value().double_value
         self.max_transport_time = self.get_parameter("max_transport_time").get_parameter_value().double_value
+        self.evaluation_path = self.get_parameter("evaluation_path").get_parameter_value().string_value
 
         # SUBPATTERN #
         self.random_walk_latest = Twist()
@@ -449,21 +454,16 @@ class CagingPattern(MovementPattern):
         self.d_min = 0.0
         self.d_max = 0.0
         self.e = 0.0
-        self.R = 3.0  # 1.5  # Sensor_Range in m
+        self.R = 3.0  # Sensor_Range in m
         self.Q = [[0.0,
-                   0.0]]  # Liste mit der eigenen Position an erster Stelle und danach die Positionen aller Nachbarn (alle Roboter die sich in der Range R um den Roboter befinden)
+                   0.0]]  # list with the own position in the first place and then the positions of all neighbors (all robots that are in the range R around the robot)
         self.current_pose = [0.0, 0.0, 0.0]  # [x, y, orientation] in [m, m, rad]
         self.odometry_list = []
         self.start_index_survey = np.inf  # index of the list at which the survey of the object was started
 
-        # color in RGB = [76, 142, 24] , in BGR = [24, 142, 76] and in HSV = [47 212 142]
-        # [100, 50, 50] bis [140, 255, 255] entspricht rot, aber warum ???
-        # [50, 100, 100] bis [70, 255, 255] entspricht grün
-        # print(cv.cvtColor(np.uint8([[BGR]]),cv.COLOR_BGR2HSV))
-
         # OBJECT variables #
-        self.lower_object_color = np.array([50, 50, 50])  # np.array([50, 50, 50])  # in HSV [H-10, 100,100]
-        self.upper_object_color = np.array([70, 255, 255])  # np.array([70, 255, 255])  # in HSV [H+10, 255, 255]
+        self.lower_object_color = np.array([50, 50, 50])  # in HSV
+        self.upper_object_color = np.array([70, 255, 255])  # in HSV
         self.near_object = False
         self.near_object_counter = 0
         self.object_in_image = False
@@ -472,8 +472,8 @@ class CagingPattern(MovementPattern):
         self.current_object_center = np.array([0.0, 0.0, 0.0])
 
         # GOAL variables #
-        self.lower_goal_color = np.array([110, 100, 100])  # np.array([0, 50, 50])  # in HSV [H-10, 100,100]
-        self.upper_goal_color = np.array([130, 255, 255])  # np.array([10, 255, 255])  # in HSV [H+10, 255, 255]
+        self.lower_goal_color = np.array([110, 100, 100])  # in HSV
+        self.upper_goal_color = np.array([130, 255, 255])  # in HSV
         self.goal_in_image = False
         self.goal_position = [0.0, 0.0]
         self.goal_dict = {}
@@ -489,8 +489,6 @@ class CagingPattern(MovementPattern):
         self.protection_publisher.publish(self.protection)
 
         # TIMER #
-        # self.state_timer = Timer(0.01, self.caging)
-        # self.state_timer.start()
         self.search_goal_timer = Timer(self.param_goal_timer_period, self.is_goal_visible,
                                        args=(self.lower_goal_color, self.upper_goal_color))
         self.search_object_timer = Timer(self.param_object_timer_period, self.is_object_visible,
@@ -498,18 +496,20 @@ class CagingPattern(MovementPattern):
         self.turn_timer = Timer(self.param_turn_timer_period, self.stop)
         self.last_call_time = time.time()
 
-        # Variablen für das Testen und Auswerten
+        # TEST AND EVALUATION #
+        self.robot_name = str(self.get_namespace())[-1]
         self.publish_state_counter = 0
         self.test_counter = 200
         self.robots_in_quorum = 0
         self.error_list = []
         self.should_orientation = 0.0
-        # 0 = time, 1 = velocity, 2 = state, 3 = pose, 4 = object_center, 5 zu 8= error, 6 = should_orientation,
-        # 7 = #robots in quorum, 8 zu 5 = goal_position, 9 = quorum, 10 = closure, 11 = caging_parameter]
+        # 0 = time, 1 = velocity, 2 = state, 3 = pose, 4 = object_center, 5 = goal_position, 6 = should_orientation,
+        # 7 = robots in quorum, 8 = error, 9 = quorum, 10 = closure, 11 = caging_parameter]
         self.state_list = [[], [[], []], [], [[], [], []], [[], [], []], [[], []], [], [], [], [], [], []]
 
     # PUBLISHER #
-    def publish_state(self):
+    def save_evaluation_data(self):
+        """ saves all evaluation data in a txt file """
         self.state_list[0].append([time.time()])
         self.state_list[1][0].append(self.direction.linear.x)
         self.state_list[1][1].append(self.direction.angular.z)
@@ -528,16 +528,8 @@ class CagingPattern(MovementPattern):
         self.state_list[9].append([int(self.quorum)])
         self.state_list[10].append([int(self.closure)])
         self.state_list[11].append([self.d_min, self.d_max, self.e, self.get_r_cage()])
-        # if len(self.odometry_list) > 0:
-        #     self.state_list[11][0].append(self.odometry_list[-1][0][0])
-        #     self.state_list[11][1].append(self.odometry_list[-1][0][1])
-        #     self.state_list[11][2].append(np.rad2deg(self.odometry_list[-1][1]))
-        # else:
-        #     self.state_list[11][0].append(0.0)
-        #     self.state_list[11][1].append(0.0)
-        #     self.state_list[11][2].append(0.0)
 
-        with open('caging_state_list_' + str(self.get_namespace())[-1] + '.txt', 'w') as doc:
+        with open(self.evaluation_path + 'caging_state_list_' + self.robot_name + '.txt', 'w') as doc:
             doc.write(str(self.state_list))
 
         # self.publish_state_counter -= 1
@@ -555,6 +547,7 @@ class CagingPattern(MovementPattern):
 
     # CALLBACKS #
     def model_states_callback(self, model_states):
+        """Call back if a new model_states msg is available."""
         index = 0
         for name in model_states.name:
             if name == 'robot_name_' + self.get_namespace()[-1]:
@@ -587,6 +580,7 @@ class CagingPattern(MovementPattern):
             index += 1
 
     def odom_callback(self, odom_msg):
+        """Call back if a new odom msg is available."""
         if self.current_scan is not None and self.state == State.SURVEY_OBJECT:
             currentPosition = [odom_msg.pose.pose.position.x, odom_msg.pose.pose.position.y]
             z = odom_msg.pose.pose.orientation.z
@@ -598,6 +592,7 @@ class CagingPattern(MovementPattern):
             self.odometry_list.append([currentPosition, currentOrientation, self.current_scan])
 
     def quorum_callback(self, incoming_msg: StringMessage):
+        """Call back if a new quorum msg is available."""
         name, value = incoming_msg.data.split(' ')
         self.quorum_dict[name] = value
 
@@ -612,26 +607,23 @@ class CagingPattern(MovementPattern):
 
     def scan_callback(self, incoming_msg: LaserScan):
         """Call back if a new scan msg is available."""
-        # self.publish_info('scan_callback')
         self.current_scan = incoming_msg
         self.caging()
 
     def camera_callback(self, raw_image_msg: Image):
         """Call back if a new scan msg is available."""
-        # self.publish_info('camera_callback')
         self.current_image = bridge.imgmsg_to_cv2(raw_image_msg, desired_encoding='passthrough')
 
-    # STATUS AKTUALISIERUNG UND AUSFÜHRUNG #
+    # STATUS UPDATE AND EXECUTION #
     def caging(self):
-        # Testprogramm, wie viel kann ein Roboter schieben
+        # Test program, how much can a robot push
         # self.direction.linear.x = self.param_max_translational_velocity
         # self.direction.angular.z = 0.0
         # self.protection.data = 'False'
         # self.protection_publisher.publish(self.protection)
         # self.command_publisher.publish(self.direction)
 
-        # self.publish_info('caging')
-        self.publish_state()
+        self.save_evaluation_data()
 
         if self.max_transport_time_reached:
             self.state = State.STOP
@@ -650,7 +642,7 @@ class CagingPattern(MovementPattern):
 
             self.update_is_max_transport_time_reached()
 
-            if self.state == State.SEARCH:  # or self.state == State.APPROACH:
+            if self.state == State.SEARCH:
                 self.update_object_infos(self.current_scan, self.current_image, self.lower_object_color,
                                          self.upper_object_color)
                 self.quorum = False
@@ -695,11 +687,9 @@ class CagingPattern(MovementPattern):
                         self.state = State.SURVEY_OBJECT
                     else:
                         self.state = State.SURROUND
-                #
+
                 # if not self.object_in_image:
                 #     self.state = State.SEARCH
-                # elif self.near_object:
-                #     self.state = State.SURROUND
 
             elif self.state == State.SURVEY_OBJECT:
                 if not self.near_object:
@@ -720,28 +710,26 @@ class CagingPattern(MovementPattern):
                     self.state = State.SURROUND
 
         if old_state == State.SURROUND and self.state != State.APPROACH and self.surround_switch_counter < 20:
-            # self.publish_info("state_switch_counter")
             self.surround_switch_counter += 1
             self.state = old_state
         else:
             self.surround_switch_counter = 0
 
-        if old_state == State.TRANSPORT and self.state != State.TRANSPORT and self.transport_switch_counter < 80: # lief mit 60 ok
-            # self.publish_info("state_switch_counter")
+        if old_state == State.TRANSPORT and self.state != State.TRANSPORT and self.transport_switch_counter < 80:
             self.transport_switch_counter += 1
             self.state = old_state
         else:
             self.transport_switch_counter = 0
 
     def execute_state(self):
+        """ Executes behavior depending on status. """
         # self.publish_info('execute_state')
-        # führt Verhalten abhängig von Status aus
         if self.state == State.INIT:
             fully_initialized = not (self.current_image is None or self.current_scan is None)
             if fully_initialized:
                 self.search_object_timer.start()
                 self.direction = self.random_walk_latest
-                self.state = State.SEARCH  # State.APPROACH
+                self.state = State.SEARCH
 
         elif self.state == State.SEARCH:
             self.direction = self.random_walk_latest
@@ -751,13 +739,11 @@ class CagingPattern(MovementPattern):
             self.direction = self.survey_object()
             self.protection.data = 'True'
 
-        elif self.state == State.APPROACH:  # if d_obj(q_i) > d_near object
-            # self.direction.angular.z = self.object_direction
-            # self.direction.linear.x = self.param_max_translational_velocity
+        elif self.state == State.APPROACH:
             self.direction = self.approach()
             self.protection.data = 'True'
 
-        elif self.state == State.SURROUND:  # if d_obj(q_i) ≤ d_near object
+        elif self.state == State.SURROUND:
             self.direction = self.surround()
             self.protection.data = 'True'
 
@@ -772,8 +758,9 @@ class CagingPattern(MovementPattern):
         self.protection_publisher.publish(self.protection)
         self.command_publisher.publish(self.direction)
 
-    # BEWEGUNGSMUSTER #
+    # MOVEMENT PATTERNS #
     def approach(self):
+        """ Moves in a spiral towards the object. """
         self.update_Q()
         v, w = self.shape_control(0.3)
         approach = Twist()
@@ -782,6 +769,7 @@ class CagingPattern(MovementPattern):
         return approach
 
     def surround(self):
+        """ Circles the object. """
         v, w = self.shape_control(0.1)
         surround = Twist()
         surround.linear.x = v
@@ -789,6 +777,7 @@ class CagingPattern(MovementPattern):
         return surround
 
     def transport(self):
+        """ Circles the object while slowly pushing it towards the target. """
         v, w = self.shape_control(0.4)
         transport = Twist()
         transport.linear.x = v
@@ -796,6 +785,7 @@ class CagingPattern(MovementPattern):
         return transport
 
     def survey_object(self):
+        """ Travels around the object at least once and measures it in the process """
         survey_object = Twist()
         if len(self.odometry_list) > 0:
             if self.start_index_survey == np.inf:
@@ -806,7 +796,7 @@ class CagingPattern(MovementPattern):
             position = self.odometry_list[-1][0]
             start_position = self.odometry_list[self.start_index_survey][0]
             distance_to_start = np.linalg.norm(np.subtract(position, start_position))
-            # evtl. überprüfen, ob schon zweimal in der Nähe der startposition war
+            # Possibly check whether it has already been near the start position twice.
 
             if self.start_index_survey > -1 and len(self.odometry_list) > self.start_index_survey + 500 and (
                     len(self.odometry_list) > self.start_index_survey + 1500):  # or distance_to_start < 0.01):
@@ -888,9 +878,7 @@ class CagingPattern(MovementPattern):
             self.last_error = 0.0
         self.last_call_time = current_time
 
-        # Ursprüngliche werte nach Ziegler und Nicholson 50, 1.78
-        # Gute Werte: 30, 1.78, 0.5, 0.7, 0.3
-        # letzte Werte: 20, 1.78, 0.5, 0.7, 0.25
+        # Original values according to Ziegler and Nicholson k_pr_crit = 50, t_p = 1.78
         k_pr_crit = 20
         t_p = 1.78
         dt = time_since_last_call
@@ -905,6 +893,7 @@ class CagingPattern(MovementPattern):
         return output
 
     def scale_velocity(self, translational_velocity, rotational_velocity):
+        """ scales the speed so that the maximum values are not exceeded. """
         if abs(translational_velocity) > self.param_max_translational_velocity:
             scale = self.param_max_translational_velocity / abs(translational_velocity)
             translational_velocity = translational_velocity * scale
@@ -916,10 +905,12 @@ class CagingPattern(MovementPattern):
         return translational_velocity, rotational_velocity
 
     def stop(self):
+        """ Stops the robot. """
         stop = Twist()
         self.command_publisher.publish(stop)
 
     def drive_backwards(self):
+        """ drives away from all obstacles. """
         backwards, obstacle_free = ScanCalculationFunctions.potential_field(2.0, 0.7,
                                                                             self.param_max_rotational_velocity,
                                                                             self.param_max_translational_velocity,
@@ -927,12 +918,12 @@ class CagingPattern(MovementPattern):
                                                                             5, None)
         if not obstacle_free:
             self.command_publisher.publish(backwards)
-            # self.publish_info('backwards START')
 
-            # TODO: param in abhängigkeit der max geschwindigkeit statt 1.0
+            # TODO: param in dependence of max speed instead of 1.0
             time.sleep(1.0)
 
     def turn_once(self):
+        """ Turns once. """
         self.turn_timer = Timer(self.param_turn_timer_period, self.stop)
         turn = Twist()
         turn.angular.z = self.param_max_rotational_velocity
@@ -940,7 +931,7 @@ class CagingPattern(MovementPattern):
         self.command_publisher.publish(turn)
         self.turn_timer.start()
 
-    # FLAGGEN #
+    # FLAGS #
     def is_busy(self):
         if self.turn_timer.is_alive() and self.state != State.INIT:
             return True
@@ -948,8 +939,8 @@ class CagingPattern(MovementPattern):
             return False
 
     def update_is_quorum(self, scan_msg):
-        # TODO: max_range sollte laut dem Paper D_min(obj) entsprechen
-        max_range = self.d_min + self.r + 0.5 # vermutlich läuft es aber mit einer etwas größeren range besser
+        """ sets quroum to true when neighbor in front and behind him. """
+        max_range = self.d_min + self.r + 0.5  # max_range should correspond to D_min(obj) according to the paper, but it runs better with a slightly larger range
         robots, robots_center = get_neighbors(scan_msg, max_range)
         front = 0
         back = 0
@@ -964,7 +955,11 @@ class CagingPattern(MovementPattern):
             self.quorum = False
 
     def update_is_closure(self):
-        """ sets closure to true, if the robots get_surround_direction the object """
+        """ sets closure to true when enough robots are in quroum. """
+        # Currently, each robot writes on a topic whether it is currently in the quroum.
+        # But this can be solved locally as soon as there is a working network between neighboring robots.
+        # Then you only have to check if the robot before and behind you is in quorum (-then you are in closure-).
+
         robots_in_quorum = sum(value == 'True' for value in self.quorum_dict.values())
         min_robots_for_closure = (2 * np.pi * self.get_r_cage()) / (2 * self.r + self.d_min)
 
@@ -976,6 +971,7 @@ class CagingPattern(MovementPattern):
         self.robots_in_quorum = robots_in_quorum
 
     def update_is_near_object(self):
+        """ Sets near_object to true if the robot is near the object. """
         old_near_object = self.near_object
         self.near_object = True
         dist_valid = True
@@ -1032,9 +1028,12 @@ class CagingPattern(MovementPattern):
 
     def update_shape_parameters(self, odometry_list):
         x, y = get_shape_points(odometry_list)
-        img = rectify_img(points2image(x, y))
-        approx, self.d_min = get_approx_dmin(img, str(self.get_namespace())[-1])  # TODO: robotname wieder entfernen
-        self.d_max = get_dmax(approx2contour(approx), str(self.get_namespace())[-1])  # TODO: robotname wieder entfernen
+        img = points2image(x, y)
+        cv.imwrite(self.evaluation_path + "OriginalShape_" + self.robot_name + ".jpeg", img)  # evaluation
+        img = rectify_img(img)
+        cv.imwrite(self.evaluation_path + "RectifiedShape_" + self.robot_name + ".jpeg", img)  # evaluation
+        approx, self.d_min = get_approx_dmin(img, self.evaluation_path, self.robot_name)  # handover of the evaluation_path and the robot_name for evaluation only
+        self.d_max = get_dmax(approx2contour(approx), self.evaluation_path, self.robot_name)  # handover of the evaluation_path and the robot_name for evaluation only
         self.e = self.d_max * 0.076
 
     def update_goal_position(self):
@@ -1058,7 +1057,9 @@ class CagingPattern(MovementPattern):
                 self.search_goal_timer = Timer(self.param_goal_timer_period, self.is_goal_visible,
                                                args=(self.lower_goal_color, self.upper_goal_color))
 
-            # TODO: Wieder einkommentieren, wenn die Abschätzung besser ist
+            # TODO: Wieder einkommentieren, if the estimation is better
+            # target position is currently read out via gazebo
+            # Improvement of the estimation via Kallmanfilter possible
             # self.goal_position[0] = float(np.mean(x_list))
             # self.goal_position[1] = float(np.mean(y_list))
 
@@ -1070,12 +1071,13 @@ class CagingPattern(MovementPattern):
 
         hsv = cv.cvtColor(image, cv.COLOR_BGR2HSV)
         obj_mask = cv.inRange(hsv, lower_color, upper_color)
-        x, y = get_centroid(obj_mask)
+        x, y = get_centroid(obj_mask, self.evaluation_path, self.robot_name)  # handover of the evaluation_path and the robot_name for evaluation only
 
-        # normiert Wert: 1 (ganz links) und -1 (ganz rechts)
+        # normalized value: 1 (far left) and -1 (far right)
         img_width = image.shape[1]
         turn_intensity_and_direction = (2 * x / img_width - 1) * -1
 
+        # TODO: create field of view variable for each robot type
         # Camera module v 2.1: Horizontal field of view = 62.2 deg & Vertical field of view = 48.8 deg
         centroid_degree = turn_intensity_and_direction * 31.1
 
@@ -1089,6 +1091,7 @@ class CagingPattern(MovementPattern):
         return goal_position
 
     def is_object_visible(self, lower_color, upper_color):
+        """ Rotates a maximum of once and stops as soon as the object is included in the image and stets object_in_image to true if the object was in the image. """
         self.search_object_timer.cancel()
         self.search_object_timer = Timer(self.param_object_timer_period, self.is_object_visible,
                                          args=(self.lower_object_color, self.upper_object_color))
@@ -1096,26 +1099,19 @@ class CagingPattern(MovementPattern):
         in_image = self.object_in_image
 
         if (not self.turn_timer.is_alive()) and (self.state == State.SEARCH):
-            # self.publish_info('!!!Starte Überprüfung auf OBJEKT!!!')
             self.turn_once()
             for i in range(0, 1000):
                 time.sleep(0.1)
                 in_image = is_color_in_image(self.current_image, lower_color, upper_color)
-                # self.info.data = 'Objekt Bild ' + str(i)
-                # self.information_publisher.publish(self.info)
 
                 if not self.turn_timer.is_alive():
-                    # self.publish_info('!!!KEIN OBJEKT in Sicht!!!')
                     in_image = False
                     break
 
                 elif in_image:
-                    # self.publish_info('!!!OBJEKT in Sicht!!!')
-
                     in_image = True
                     self.turn_timer.cancel()
                     self.turn_timer = Timer(self.param_turn_timer_period, self.stop)
-                    # self.publish_info('Der turn_timer wurde gecancelt')
                     self.stop()
                     break
 
@@ -1124,6 +1120,7 @@ class CagingPattern(MovementPattern):
         self.search_object_timer.start()
 
     def is_goal_visible(self, lower_color, upper_color):
+        """ Rotates once and returns ture if the goal was at least one time in the image. """
         in_image = False
         if not self.turn_timer.is_alive():
             # self.publish_info('!!!Starte Überprüfung auf ZIEL!!')
@@ -1136,14 +1133,10 @@ class CagingPattern(MovementPattern):
                 if not self.turn_timer.is_alive() or in_image:
                     break
 
-            # if in_image:
-            #     self.publish_info('!!!ZIEL in Sicht!!!')
-            # else:
-            #     self.publish_info('!!!KEIN ZIEL in Sicht!!!')
-
         return in_image
 
     def update_object_infos(self, scan_msg, image, lower_color, upper_color):
+        """ Updates if the object is in the image, how far away it is and the vector pointing to the object center. """
         is_in_image = is_color_in_image(image, lower_color, upper_color)
         obj_distance = np.inf
         obj_direction = 0.0
@@ -1151,7 +1144,7 @@ class CagingPattern(MovementPattern):
         if is_in_image:
             hsv = cv.cvtColor(image, cv.COLOR_BGR2HSV)
             obj_mask = cv.inRange(hsv, lower_color, upper_color)
-            x, y = get_centroid(obj_mask)
+            x, y = get_centroid(obj_mask, self.evaluation_path, self.robot_name)  # handover of the evaluation_path and the robot_name for evaluation only
 
             cv.imwrite('Original.jpeg', image)
             cv.imwrite('Maske.jpeg', obj_mask)
@@ -1173,9 +1166,9 @@ class CagingPattern(MovementPattern):
         self.object_direction = obj_direction
         self.object_distance = obj_distance
 
-    # BERECHNUNGEN #
+    # CALCULATIONS #
     def update_Q(self):
-        # gibt Liste zurück mit der eigenen Position an erster Stelle und danach die Positionen aller Nachbarn (alle Roboter die sich in der Range R_0 um den Roboter befinden)
+        """ updates Q, Q is a list with the own position in the first place and then the positions of all neighbors (All robots that are in the range R_0 around the robot). """
         robots, robots_center = get_neighbors(self.current_scan, self.R)
         q = [[self.current_pose[0], self.current_pose[1]]]
         for robot in robots_center:
@@ -1277,6 +1270,7 @@ class CagingPattern(MovementPattern):
             self.max_transport_time_reached = True
 
     def get_trajectory(self):
+        """ Calculates the trajectory to the target and returns over time the corresponding point along the line between object center and target. """
         initialize = self.trajectory is None or time.time() - self.last_call_time_get_trajectory > 10.0
         refresh = not initialize and time.time() - self.trajectory[0] > 30.0
 

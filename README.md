@@ -67,19 +67,31 @@ The following table gives an overview the current implemented patterns.
 The patterns are separated into movement and voting patterns. 
 Every pattern can either be a basic pattern or a combined one, which make use of one or more other patterns to create more complex behaviors.
 
-| Pattern                  | Domain   | Type     | Simulation          | Robot  |
-| ------                   | ------   | ------   | ------              | ------ |
-| drive                    | Movement | Basic    | :heavy_check_mark:  | :heavy_check_mark: |
-| dispersion               | Movement | Basic    | :heavy_check_mark:  | :heavy_check_mark: |
-| attraction               | Movement | Basic    | :heavy_check_mark:  | :heavy_check_mark: |
-| magnetometer             | Movement | Basic    | :x:                 | :heavy_check_mark: |
-| minimalist flocking      | Movement | Basic    | :heavy_check_mark:  | :heavy_check_mark: |
-| random walk      | Movement | Basic    | :heavy_check_mark:  | :heavy_check_mark: |
-| discussed dispersion pattern                 | Movement | Combined | :heavy_check_mark:  | :heavy_check_mark: |
-| voter model              | Voting   | Basic    | :heavy_check_mark:  | :heavy_check_mark: |
-| majority rule            | Voting   | Basic    | :heavy_check_mark:  | :heavy_check_mark: |
+| Pattern                      | Domain   | Type     | Simulation          | Robot  |
+|------------------------------| ------   | ------   | ------              | ------ |
+| drive                        | Movement | Basic    | :heavy_check_mark:  | :heavy_check_mark: |
+| dispersion                   | Movement | Basic    | :heavy_check_mark:  | :heavy_check_mark: |
+| attraction                   | Movement | Basic    | :heavy_check_mark:  | :heavy_check_mark: |
+| magnetometer                 | Movement | Basic    | :x:                 | :heavy_check_mark: |
+| minimalist flocking          | Movement | Basic    | :heavy_check_mark:  | :heavy_check_mark: |
+| random walk                  | Movement | Basic    | :heavy_check_mark:  | :heavy_check_mark: |
+| pushing                      | Movement | Basic    | :heavy_check_mark:  | :heavy_check_mark: |
+| caging                       | Movement | Combined | :heavy_check_mark:  | :x: |
+| dynamic change transport     | Movement | Combined | :heavy_check_mark:  | :x:  |
+| discussed dispersion pattern | Movement | Combined | :heavy_check_mark:  | :heavy_check_mark: |
+| voter model                  | Voting   | Basic    | :heavy_check_mark:  | :heavy_check_mark: |
+| majority rule                | Voting   | Basic    | :heavy_check_mark:  | :heavy_check_mark: |
 
 In addition, a hardware protection layer is started to prevent collisions.
+
+For the transport pattern pushing, caging and dynamic change transport there are already objects to push.
+These are located under ROS2swarm/src/launch_turtlebot_gazebo/objects and can be inserted into a gazebo world by adding the named path in gazebo and then selecting the desired object in the folder structure and finally clicking on the desired position in the world.
+
+Objects: Circle_1,25x1,2_d0,8 | concave_4x3,66x0,2_d0,8 | Rectangle_3x2x0,2_d0,8 | Triangle_3x0,2_d0,8
+Goals: Goal
+
+To insert a self created 3D object into gazebo you have to do the following:
+open gazebo > Edit > Model Editor > add Custom shapes > select file path of .dae, .stl or .obj file > save and exit
 
 <a name="architecture"></a>
 ### **Architecture**

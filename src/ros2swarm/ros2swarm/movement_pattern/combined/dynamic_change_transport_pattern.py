@@ -21,7 +21,7 @@ bridge = CvBridge()
 
 
 def get_shape_points(odometry_list):
-    # Punkte der Shape aus Laserdaten und Roboterposition berechnen
+    """ calculates points of the shape from the laser data and robot positions contained in the odometry_list """
     x = []
     y = []
     for j in range(len(odometry_list)):
@@ -48,80 +48,76 @@ def get_shape_points(odometry_list):
 
 
 def points2image(x, y):
-    # Punkte der Shape in Bild umwandeln
+    """ returns an image created from the passed points """
     scale = 100
     frame = 200 / scale
 
-    # Alle Punkte in den positiven bereich verschieben
+    # Move all points to the positive area
     x = np.add(x, np.min(x) * -1 + frame) * scale
     y = np.add(y, np.min(y) * -1 + frame) * scale
 
-    # leeres Bild erstellen
+    # Create empty image
     img = np.zeros((int(np.max(y) + frame * scale), int(np.max(x) + frame * scale)), dtype=np.uint8)
 
-    # Zeichne alle Punkte in das Bild
+    # Draw all points in the image
     for point in zip(*[x, y]):
         cv.circle(img, (int(point[0]), int(point[1])), 1, 255, -1)
 
     img = cv.cvtColor(img, cv.COLOR_GRAY2BGR)
-    cv.imwrite("/home/lydia/Bilder/OriginalShape.jpeg", img)  # TODO: wieder entfernen
     return img
 
 
 def rectify_img(img):
-    # Bild entzerren
-    angle = 14.8  # Rotationswinkel im Uhrzeigersinn
-    stretch = 0.526  # Streckung
-
-    # Abmessungen des Bildes
+    """ rectifies the image """
+    angle = 14.8  # Clockwise rotation angle
+    stretch = 0.526
     height, width = img.shape[:2]
 
-    # Rotieren
+    # rotate
     M = cv.getRotationMatrix2D((width / 2, height / 2), angle, 1)
     img = cv.warpAffine(img, M, (width, height))
 
-    # Strecken
+    # stretch
     new_height = int(height * stretch)
 
-    # Skalieren
+    # scale
     img = cv.resize(img, (width, new_height))
 
-    # Zurückdrehen
+    # rotate back
     M = cv.getRotationMatrix2D((width / 2, new_height / 2), 360 - angle, 1)
     img = cv.warpAffine(img, M, (width, new_height))
-
-    cv.imwrite("/home/lydia/Bilder/EntzerrteShape.jpeg", img)  # TODO: wieder entfernen
     return img
 
 
 def get_shape_contours(img):
+    """ returns a list with the contours contained in the image """
     gray = cv.cvtColor(img, cv.COLOR_RGB2GRAY)
 
     for i in range(4):
-        # Bild glätten
+        # Smooth image
         median = cv.medianBlur(gray, 5)
         blurred = cv.GaussianBlur(median, (5, 5), 0)
 
-        # Lücken schließen
+        # Close gaps
         kernel = np.ones((5, 5), np.uint8)
         closing = cv.morphologyEx(blurred, cv.MORPH_CLOSE, kernel)
         opening = cv.morphologyEx(closing, cv.MORPH_OPEN, kernel)
 
-        # Schwellenwert anwenden
+        # Apply threshold
         thresh = cv.threshold(opening, 1, 255, cv.THRESH_BINARY)[1]
         gray = thresh
 
     edges = cv.Canny(gray, 100, 200)
 
-    # Konturen extrahieren
+    # Extract contours
     contours = cv.findContours(edges, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
     contours = imutils.grab_contours(contours)
 
-    cv.imwrite("/home/lydia/Bilder/GeglätteteShape.jpeg", gray)  # TODO: wieder entfernen
     return contours
 
 
-def get_approx_dmin(img, robot_name):
+def get_approx_dmin(img, evaluation_path, robot_name):
+    """ returns an approximated shape and its smallest diameter """
     contours = get_shape_contours(img)
     contour = None
     w = 0.0
@@ -132,9 +128,9 @@ def get_approx_dmin(img, robot_name):
     rect_new = None
     approx = None
 
-    # größte contour finden
+    # Find largest contour
     for contour in contours:
-        # Umgebendes Rechteck berechnen
+        # Calculate surrounding rectangle
         rect_new = cv.minAreaRect(contour)
         w_new = rect_new[1][0]
         h_new = rect_new[1][1]
@@ -143,36 +139,38 @@ def get_approx_dmin(img, robot_name):
             w = w_new
             h = h_new
             rect = rect_new
-            # contour approximieren
+            # approximate contour
             approx = cv.approxPolyDP(contour, 15, True)
 
     d_min = min(w, h)
 
+    # only for evaluation purposes
     box = np.intp(cv.boxPoints(rect))
     cv.drawContours(img, [box], 0, (0, 255, 0), 2)
     cv.drawContours(img, [approx], -1, (0, 0, 255), 2)
-    cv.imwrite("/home/lydia/Bilder/AusgewerteteShape" + robot_name + ".jpeg", img)  # TODO: wieder entfernen
+    cv.imwrite(evaluation_path + "EvaluatedShape_" + robot_name + ".jpeg", img)
 
     return approx, d_min / 100
 
 
 def approx2contour(approx):
+    """ returns the contour of the approximated shape """
     contour = []
     line_points = []
 
     for i in range(len(approx) - 1):
         p1 = approx[i][0]
         p2 = approx[i + 1][0]
-        # Bestimmung der Steigung
+        # Determination of the slope
         if p2[0] - p1[0] != 0:
             m = (p2[1] - p1[1]) / (p2[0] - p1[0])
         else:
             m = np.sign(p2[1] - p1[1]) * 9999999999999999
 
-        # Bestimmung des Y-Achsenabschnitts
+        # Determination of the Y-axis intercept
         b = p1[1] - m * p1[0]
 
-        # Bestimmung des größeren und kleineren Punkts
+        # Determination of the larger and smaller point
         if p1[0] < p2[0]:
             x1 = p1[0]
             x2 = p2[0]
@@ -190,8 +188,11 @@ def approx2contour(approx):
     return contour
 
 
-def get_dmax(contour, robot_name):
+def get_dmax(contour, evaluation_path, robot_name):
+    """ Returns the maximum diameter of the contour. """
     d_max = 0.0
+
+    # for evaluation purposes only
     max_line = []
 
     for i in range(len(contour)):
@@ -201,21 +202,21 @@ def get_dmax(contour, robot_name):
             dist = np.linalg.norm(p1 - p2)
             if dist > d_max:
                 d_max = dist
-                # TODO: wieder entfernen
+                # for evaluation purposes only
                 max_line = [(int(p1[0]), int(p1[1])), (int(p2[0]), int(p2[1]))]
 
-    # draw d_max in img TODO: wieder entfernen
-    img = cv.imread("/home/lydia/Bilder/AusgewerteteShape" + robot_name + ".jpeg")
+    # draws d_max in img, for evaluation purposes only
+    img = cv.imread(evaluation_path + "EvaluatedShape_" + robot_name + ".jpeg")
     cv.line(img, max_line[0], max_line[1], (255, 255, 0), 2)
-    cv.imwrite("/home/lydia/Bilder/AusgewerteteShape" + robot_name + ".jpeg", img)
+    cv.imwrite(evaluation_path + "EvaluatedShape_" + robot_name + ".jpeg", img)
 
     return d_max / 100
 
 
 def get_neighbors(scan_msg, max_range):
-    # TODO: Params für den threshold und width abhängig von roboter typ anlegen
-    # center: erster wert entfernung in meter , zweiter wert rad (vorne 0, links rum steigend bis 2pi)
-    # roboter werden zwischen 0.2m und 3.5m erkannt min_range=0, max_range=3.5, threshold=0.35, min_width=0, max_width=15
+    """ returns all robots in the radius max_range """
+    # TODO: Create params for threshold and width depending on robot type
+    # robots are detected between 0.2m and 3.5m min_range=0, max_range=3.5, threshold=0.35, min_width=0, max_width=15
     robots, robots_center = ScanCalculationFunctions.identify_robots(laser_scan=scan_msg, min_range=0,
                                                                      max_range=max_range, threshold=0.35, min_width=0,
                                                                      max_width=15)
@@ -223,6 +224,7 @@ def get_neighbors(scan_msg, max_range):
 
 
 def get_image_contour(img, lower_color, upper_color):
+    """ returns a contour if exactly one contour is detected in the image """
     hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
     grey = cv.inRange(hsv, lower_color, upper_color)
     median = cv.medianBlur(grey, 5)
@@ -239,6 +241,7 @@ def get_image_contour(img, lower_color, upper_color):
 
 
 def get_center(contour):
+    """ Returns the center of the contour in pixel. """
     x = 0
     y = 0
     M = cv.moments(contour)
@@ -251,6 +254,7 @@ def get_center(contour):
 
 
 def is_color_in_image(image, lower_color, upper_color):
+    """ returns true if the image contains the given color """
     is_in_image = False
     hsv = cv.cvtColor(image, cv.COLOR_BGR2HSV)
     obj_mask = cv.inRange(hsv, lower_color, upper_color)
@@ -263,6 +267,7 @@ def is_color_in_image(image, lower_color, upper_color):
 
 
 def get_distance(scan_msg, degree):
+    """ returns the distance in the direction of the given angle """
     rad = np.deg2rad(degree)
     increment = scan_msg.angle_increment
     min_rad = scan_msg.angle_min
@@ -276,7 +281,7 @@ def get_distance(scan_msg, degree):
 
 def get_mean_dist(scan_msg, min_angle, max_angle):
     """ calculates the mean distance to obstacles between the min_angle and max_angle """
-    R = scan_msg.range_max
+    max_range = scan_msg.range_max
     sum_dist = 0.0
     start_angle = np.deg2rad(min_angle)  # rad (front = 0 rad)
     end_angle = np.deg2rad(max_angle)  # rad (front = 0 rad)
@@ -291,8 +296,8 @@ def get_mean_dist(scan_msg, min_angle, max_angle):
         dist_i = scan_msg.ranges[i]
         if np.isnan(dist_i):
             dist_i = 0.0
-        if np.isinf(dist_i) or dist_i > R:
-            dist_i = R
+        if np.isinf(dist_i) or dist_i > max_range:
+            dist_i = max_range
 
         sum_dist += dist_i
 
@@ -323,7 +328,8 @@ class DynamicChangeTransportPattern(MovementPattern):
                 ('min_detectable_height', None),
                 ('pixel_size', None),
                 ('object_name', None),
-                ('goal_name', None)
+                ('goal_name', None),
+                ('evaluation_path', None)
             ])
 
         # PARAMS #
@@ -342,6 +348,7 @@ class DynamicChangeTransportPattern(MovementPattern):
         self.max_detectable_height = self.get_parameter("max_detectable_height").get_parameter_value().double_value
         self.min_detectable_height = self.get_parameter("min_detectable_height").get_parameter_value().double_value
         self.pixel_size = self.get_parameter("pixel_size").get_parameter_value().double_value
+        self.evaluation_path = self.get_parameter("evaluation_path").get_parameter_value().string_value
 
         # SUBPATTERN #
         self.random_walk_latest = Twist()
@@ -370,7 +377,7 @@ class DynamicChangeTransportPattern(MovementPattern):
         self.information_publisher = self.create_publisher(StringMessage, self.get_namespace() + '/information', 10)
         self.protection_publisher = self.create_publisher(StringMessage, self.get_namespace() + '/hardware_protection_layer', 10)
 
-
+        # GENERAL #
         self.direction = Twist()
         self.state = State.INIT
         self.pushing = False
@@ -383,14 +390,9 @@ class DynamicChangeTransportPattern(MovementPattern):
         self.max_transport_time_reached = False
         self.transport_start_time = None
 
-        # color in RGB = [76, 142, 24] , in BGR = [24, 142, 76] and in HSV = [47 212 142]
-        # [100, 50, 50] bis [140, 255, 255] entspricht rot, aber warum ???
-        # [50, 100, 100] bis [70, 255, 255] entspricht grün
-        # print(cv.cvtColor(np.uint8([[BGR]]),cv.COLOR_BGR2HSV))
-
-        # OBJECT variables #
-        self.lower_object_color = np.array([50, 50, 50])  # np.array([50, 50, 50])  # in HSV [H-10, 100,100]
-        self.upper_object_color = np.array([70, 255, 255])  # np.array([70, 255, 255])  # in HSV [H+10, 255, 255]
+        # OBJECT #
+        self.lower_object_color = np.array([50, 50, 50])  # in HSV
+        self.upper_object_color = np.array([70, 255, 255])  # in HSV
         self.near_object = False
         self.near_object_counter = 0
         self.object_in_image = False
@@ -407,13 +409,10 @@ class DynamicChangeTransportPattern(MovementPattern):
         self.protection_publisher.publish(self.protection)
 
         # TIMER #
-        # self.state_timer = Timer(0.01, self.dynamic_change)
-        # self.state_timer.start()
-
         self.search_object_timer = Timer(self.param_object_timer_period, self.is_object_visible)
         self.turn_timer = Timer(self.param_turn_timer_period, self.stop)
 
-        # ZUM TESTEN UND AUSWERTEN #
+        # TEST AND EVALUATION #
         self.model_states_subscription = self.create_subscription(ModelStates, '/gazebo/model_states',
                                                                   self.model_states_callback,
                                                                   qos_profile=qos_profile_sensor_data)
@@ -423,9 +422,11 @@ class DynamicChangeTransportPattern(MovementPattern):
         self.current_object_center = [[], [], []]
         self.goal_position = [[], []]
         self.current_pose = [[], [], []]
+        self.robot_name = str(self.get_namespace())[-1]
 
     # PUBLISHER #
-    def publish_state(self):
+    def save_evaluation_data(self):
+        """ saves all evaluation data in a txt file """
         self.state_list[0].append([time.time()])
         self.state_list[1][0].append(self.direction.linear.x)
         self.state_list[1][1].append(self.direction.angular.z)
@@ -441,11 +442,11 @@ class DynamicChangeTransportPattern(MovementPattern):
         with open('dynamic_change_state_list_' + str(self.get_namespace())[-1] + '.txt', 'w') as doc:
             doc.write(str(self.state_list))
 
-        self.publish_state_counter -= 1
-        if self.publish_state_counter <= 0:
-            self.publish_state_counter = 10
-            self.info.data = '_____' + str(self.state) + '_____ height=' + str(self.object_height) + ' near_object=' + str(self.near_object) + ' object_in_image=' + str(self.object_in_image)
-            self.information_publisher.publish(self.info)
+        # self.publish_state_counter -= 1
+        # if self.publish_state_counter <= 0:
+        #     self.publish_state_counter = 10
+        #     self.info.data = '_____' + str(self.state) + '_____ height=' + str(self.object_height) + ' near_object=' + str(self.near_object) + ' object_in_image=' + str(self.object_in_image)
+        #     self.information_publisher.publish(self.info)
 
     def publish_info(self, msg):
         self.info.data = str(msg)
@@ -453,6 +454,7 @@ class DynamicChangeTransportPattern(MovementPattern):
 
     # CALLBACKS #
     def model_states_callback(self, model_states):
+        """Call back if a new model_states msg is available."""
         index = 0
         for name in model_states.name:
             if name == 'robot_name_' + self.get_namespace()[-1]:
@@ -485,6 +487,7 @@ class DynamicChangeTransportPattern(MovementPattern):
             index += 1
 
     def odom_callback(self, odom_msg):
+        """Call back if a new odom msg is available."""
         if self.current_scan is not None and self.state == State.SURVEY_OBJECT:
             currentPosition = [odom_msg.pose.pose.position.x, odom_msg.pose.pose.position.y]
             z = odom_msg.pose.pose.orientation.z
@@ -509,25 +512,16 @@ class DynamicChangeTransportPattern(MovementPattern):
 
     def scan_callback(self, incoming_msg: LaserScan):
         """Call back if a new scan msg is available."""
-        # self.publish_info('scan_callback')
         self.current_scan = incoming_msg
         self.dynamic_change()
 
     def camera_callback(self, raw_image_msg: Image):
         """Call back if a new scan msg is available."""
-        # self.publish_info('camera_callback')
         self.current_image = bridge.imgmsg_to_cv2(raw_image_msg, desired_encoding='passthrough')
 
-    # STATUS AKTUALISIERUNG UND AUSFÜHRUNG #
+    # STATUS UPDATE AND EXECUTION #
     def dynamic_change(self):
-        # Testprogramm, wie viel kann ein Roboter schieben
-        # self.direction.linear.x = self.param_max_translational_velocity
-        # self.direction.angular.z = 0.0
-        # self.protection.data = 'False'
-        # self.protection_publisher.publish(self.protection)
-        # self.command_publisher.publish(self.direction)
-
-        self.publish_state()
+        self.save_evaluation_data()
 
         if self.max_transport_time_reached:
             self.state = State.STOP
@@ -539,7 +533,6 @@ class DynamicChangeTransportPattern(MovementPattern):
         self.execute_state()
 
     def update_flags(self):
-        # self.publish_info('update_flags')
         if self.state != State.INIT:
             self.update_is_max_transport_time_reached()
 
@@ -550,7 +543,6 @@ class DynamicChangeTransportPattern(MovementPattern):
                 self.update_is_near_object()
 
     def update_state(self):
-        # self.publish_info('update_state')
         if self.state != State.INIT:
             if self.state == State.SEARCH:
                 if self.object_in_image:
@@ -571,15 +563,11 @@ class DynamicChangeTransportPattern(MovementPattern):
                     self.state = State.PUSHING
 
             elif self.state == State.PUSHING or self.state == State.CAGING:
-                # TODO: müsste eigentlich gestartet werden wenn alles gestartet wird
-                #  und  nicht erst, wenn er sich für pushing oder caging entscheidet
-                #  und dem entsprechend auch gestoppt werden in egal welchem zustand
                 if self.max_transport_time_reached:
                     self.state = State.STOP
 
     def execute_state(self):
-        # self.publish_info('execute_state')
-        # führt Verhalten abhängig von Status aus
+        """ Executes behavior depending on status. """
         if self.state == State.INIT:
             fully_initialized = not (self.current_image is None or self.current_scan is None)
             if fully_initialized:
@@ -593,7 +581,7 @@ class DynamicChangeTransportPattern(MovementPattern):
             self.protection.data = 'True'
 
         elif self.state == State.APPROACH:
-            self.get_object_height()
+            self.update_object_height()
             self.direction = self.approach()
             self.protection.data = 'True'
 
@@ -616,8 +604,9 @@ class DynamicChangeTransportPattern(MovementPattern):
         self.protection_publisher.publish(self.protection)
         self.command_publisher.publish(self.direction)
 
-    # BEWEGUNGSMUSTER #
+    # MOVEMENT PATTERNS #
     def approach(self):
+        """ drives towards object center """
         image = self.current_image
         img_width = image.shape[1]
         contour = get_image_contour(image, self.lower_object_color, self.upper_object_color)
@@ -625,10 +614,10 @@ class DynamicChangeTransportPattern(MovementPattern):
             x, y = get_center(contour)
             # normiert Wert: 1 (ganz links) und -1 (ganz rechts)
             turn_intensity_and_direction = (2 * x / img_width - 1) * -1
-            # draw the contour and center of the shape on the image TODO: wieder entfernen
+            # draw the contour and center of the shape on the image, for evaluation only
             cv.drawContours(image, [contour], -1, (255, 0, 0), 2)
             cv.circle(image, (x, y), 7, (255, 0, 0), -1)
-            cv.imwrite('ApproachCenter.jpeg', image)
+            cv.imwrite(self.evaluation_path + 'ApproachCenter_' + self.robot_name + '.jpeg', image)
         else:
             turn_intensity_and_direction = 0.0
 
@@ -639,27 +628,24 @@ class DynamicChangeTransportPattern(MovementPattern):
         return approach
 
     def survey_object(self):
+        """ Travels around the object at least once and measures it in the process """
         survey_object = Twist()
-        self.publish_info("In survey_object")
         if len(self.odometry_list) > 0:
-            self.publish_info("len(self.odometry_list) > 0:")
             if self.start_index_survey == np.inf:
                 self.start_index_survey = len(self.odometry_list) - 1
             elif self.start_index_survey == -1:
-                self.publish_info("self.start_index_survey == -1:")
                 return survey_object
 
             position = self.odometry_list[-1][0]
             start_position = self.odometry_list[self.start_index_survey][0]
             distance_to_start = np.linalg.norm(np.subtract(position, start_position))
-            # evtl. überprüfen, ob schon zweimal in der Nähe der startposition war
+            # Possibly check whether it has already been near the start position twice.
 
             if self.start_index_survey > -1 and len(self.odometry_list) > self.start_index_survey + 300 and (
                     len(self.odometry_list) > self.start_index_survey + 1500):  # or distance_to_start < 0.01):
                 self.decide_transport_strategy(self.odometry_list[self.start_index_survey + 200:-1])
                 self.start_index_survey = -1
             else:
-                self.publish_info("wall_follow()")
                 survey_object = self.wall_follow()
 
         return survey_object
@@ -696,10 +682,12 @@ class DynamicChangeTransportPattern(MovementPattern):
         return wall_follow_direction
 
     def stop(self):
+        """ Stops the robot. """
         stop = Twist()
         self.command_publisher.publish(stop)
 
     def turn_once(self):
+        """ Turns once. """
         self.turn_timer = Timer(self.param_turn_timer_period, self.stop)
         turn = Twist()
         turn.angular.z = self.param_max_rotational_velocity
@@ -714,22 +702,20 @@ class DynamicChangeTransportPattern(MovementPattern):
             return False
 
     def is_object_visible(self):
+        """ Rotates a maximum of once and stops as soon as the object is included in the image and stets object_in_image to true if the object was in the image. """
         self.search_object_timer.cancel()
         self.search_object_timer = Timer(self.param_object_timer_period, self.is_object_visible)
 
         if (not self.turn_timer.is_alive()) and (self.state == State.SEARCH):
-            # self.publish_info('!!!Starte Überprüfung auf OBJEKT!!!')
             self.turn_once()
             for i in range(0, 1000):
                 time.sleep(0.1)
                 self.update_is_object_in_image()
 
                 if not self.turn_timer.is_alive():
-                    # self.publish_info('!!!KEIN OBJEKT in Sicht!!!')
                     break
 
                 elif self.object_in_image:
-                    # self.publish_info('!!!OBJEKT in Sicht!!!')
                     self.turn_timer.cancel()
                     self.turn_timer = Timer(self.param_turn_timer_period, self.stop)
                     self.stop()
@@ -737,7 +723,8 @@ class DynamicChangeTransportPattern(MovementPattern):
 
         self.search_object_timer.start()
 
-    def get_object_height(self):
+    def update_object_height(self):
+        """ Sets object_height to the calculated object height. """
 
         if self.object_height >= self.min_detectable_height:
             return
@@ -749,20 +736,21 @@ class DynamicChangeTransportPattern(MovementPattern):
         if dist >= scan.range_max:
             return
 
-        # Überprüfen ob roboter vor einem
+        # Checking if there is a robot in front of you
         robots, robots_center = get_neighbors(scan, scan.range_max)
         for robot in robots_center:
             if np.deg2rad(355) < robot[1] < np.deg2rad(5):
-                self.publish_info("robot front: " + str(np.rad2deg(robot[1])))
+                # self.publish_info("robot front: " + str(np.rad2deg(robot[1])))
                 return
 
         contour = get_image_contour(img, self.lower_object_color, self.upper_object_color)
         if contour is None:
-            self.publish_info("contour is None")
+            # self.publish_info("contour is None")
             return
 
+        # for evaluation only
         cv.drawContours(img, [contour], -1, (255, 0, 0), 2)
-        cv.imwrite("/home/lydia/Bilder/height_dist" + str(dist) + "_robot" + str(self.get_namespace())[-1] + ".jpeg", img)  # TODO: wieder entfernen
+        cv.imwrite(self.evaluation_path + "height_dist" + str(dist) + "_robot" + self.robot_name + ".jpeg", img)
 
         # get the height of the contour at the center of the picture
         min_y = img.shape[0]
@@ -777,10 +765,7 @@ class DynamicChangeTransportPattern(MovementPattern):
                     max_y = y
 
         height_px = max_y - min_y
-        self.publish_info("height_px = " + str(height_px))
-        self.publish_info("dist = " + str(dist))
         height = height_px * self.pixel_size
-        self.publish_info("height = " + str(height))
 
         if height > self.max_detectable_height:
             height = np.inf
@@ -794,7 +779,6 @@ class DynamicChangeTransportPattern(MovementPattern):
         self.near_object = True
         dist_valid = True
 
-        # 0° ist vorne, 90° ist links, 180° ist hinten, 270° ist rechts
         robots, robots_center = get_neighbors(self.current_scan, 1.5)
 
         if self.state == State.APPROACH:
@@ -834,11 +818,15 @@ class DynamicChangeTransportPattern(MovementPattern):
             self.max_transport_time_reached = True
 
     def decide_transport_strategy(self, odometry_list):
+        """ Calculates required parameters for the decision and then decides whether to apply pushing or caging by setting pushing or caging to true. """
         # calculate required parameters for the decision
         x, y = get_shape_points(odometry_list)
-        img = rectify_img(points2image(x, y))
-        approx, d_min = get_approx_dmin(img, str(self.get_namespace())[-1])  # TODO: robotname wieder entfernen
-        d_max = get_dmax(approx2contour(approx), str(self.get_namespace())[-1])  # TODO: robotname wieder entfernen
+        img = points2image(x, y)
+        cv.imwrite(self.evaluation_path + "OriginalShape_" + self.robot_name + ".jpeg", img)  # evaluation
+        img = rectify_img(img)
+        cv.imwrite(self.evaluation_path + "RectifiedShape_" + self.robot_name + ".jpeg", img)  # evaluation
+        approx, d_min = get_approx_dmin(img, self.evaluation_path, self.robot_name)  # handover of the evaluation_path and the robot_name for evaluation only
+        d_max = get_dmax(approx2contour(approx), self.evaluation_path, self.robot_name)  # handover of the evaluation_path and the robot_name for evaluation only
         convex = cv.isContourConvex(approx)
         area = cv.contourArea(approx)
         if self.object_height < self.min_detectable_height:
@@ -850,15 +838,16 @@ class DynamicChangeTransportPattern(MovementPattern):
         e = d_max * 0.076
         r_cage = 0.5 * d_max + self.r + self.l + e
         min_robots_caging = (2 * np.pi * r_cage) / (2 * self.r + d_min)
-        number_of_available_robots = 5.0  # TODO: Abschätzung wie viele Roboter vorhanden sind
+        number_of_available_robots = 5.0  # TODO: Estimate how many robots are available
 
-        # TODO: Entscheidungsregeln für Pushing und Caging festlegen
         pushing = True
         caging = True
 
-        if not convex or weight > 500:
+        # I came up with the 10Kg and 2kg by testing 5 Turtlebots transporting an object with different transport strategies and weights.
+        # TODO: the parameters still have to be made depending on the number of robots and the robot type
+        if not convex or weight > 10:
             pushing = False
-        if min_robots_caging > number_of_available_robots or weight > 100:
+        if min_robots_caging > number_of_available_robots or weight > 2:
             caging = False
         if caging and pushing:
             pushing = False
@@ -868,16 +857,17 @@ class DynamicChangeTransportPattern(MovementPattern):
         self.pushing = pushing
         self.caging = caging
 
-        # TODO: Wieder entfernen, nur zum auswerten
+        # for evaluation only
         height = self.object_height
         if height == np.inf:
             height = 100.0
         self.state_list[6].append([d_min, d_max, height, area, weight, e, r_cage, convex])
 
-        with open('dynamic_change_state_list_' + str(self.get_namespace())[-1] + '.txt', 'w') as doc:
+        with open(self.evaluation_path + 'dynamic_change_state_list_' + self.robot_name + '.txt', 'w') as doc:
             doc.write(str(self.state_list))
 
     def scale_velocity(self, translational_velocity, rotational_velocity):
+        """ scales the speed so that the maximum values are not exceeded. """
         if abs(translational_velocity) > self.param_max_translational_velocity:
             scale = self.param_max_translational_velocity / abs(translational_velocity)
             translational_velocity = translational_velocity * scale

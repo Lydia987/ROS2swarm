@@ -1,0 +1,7 @@
+Jeder Transporttyp enthält einen Ordner je Objekt.
+Jedes Objekt enthält 10 Versuchsordner.
+Jeder Versuchsordner entählt:
+- State_list aller Roboter
+- Foto der Ausgewerteten Shape und des Bilds für die Bestimmung der Höhe incl. Distanz aller Roboter
+- Video der Simulation, am Besten in Echtzeit.
+
